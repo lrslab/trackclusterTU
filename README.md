@@ -22,21 +22,34 @@ Reads are clustered into candidate transcript units using overlap-based similari
 By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to attach truncated reads.
 If you want to keep the score1 seed clusters as the final TUs, pass `--skip-score2-attachment`.
 
-## Install / Build
+## Install
+
+### Option 1: Download A GitHub Release Binary
+
+Prebuilt release tarballs are published from GitHub Actions on tagged releases:
+
+- Releases: [lrslab/trackclusterTU/releases](https://github.com/lrslab/trackclusterTU/releases)
+- Artifact naming: `trackclustertu-<tag>-<target>.tar.gz`
+
+Download the archive for your platform, extract it, and place `trackclustertu` somewhere on your `PATH`.
+
+### Option 2: Clone And Build From Source
 
 ```bash
+git clone https://github.com/lrslab/trackclusterTU.git
+cd trackclusterTU
 cargo build --release --bin trackclustertu
 ```
 
-To install the supported CLI:
+The built executable will be:
+
+- `target/release/trackclustertu`
+
+To install it into Cargo's bin directory instead:
 
 ```bash
 cargo install --path . --bin trackclustertu
 ```
-
-After `cargo build --release --bin trackclustertu`, the executable is:
-
-- `target/release/trackclustertu`
 
 ## External Mapping Tools
 
