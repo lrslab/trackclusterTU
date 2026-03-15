@@ -163,7 +163,10 @@ This writes:
 - `results/tu_count.csv`
 - `results/gene_count.csv` with annotation
 
-### Step 3: Run Stages Explicitly
+### Step 3: Optionally Run Stages Separately
+
+You do not need to run these commands after Step 2.
+Use this staged workflow only if you want to run each step separately instead of `trackclustertu run`.
 
 ```bash
 trackclustertu map \
@@ -188,9 +191,13 @@ trackclustertu gff-to-bed \
 trackclustertu cluster \
   --manifest mapped/samples.bed.tsv \
   --format bed6 \
+  --score1-threshold 0.95 \
+  --score2-threshold 0.99 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
+
+The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.99`.
 
 ```bash
 trackclustertu recount \

@@ -18,6 +18,9 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 - `*.tu_count.csv` (CSV): TU counts table
   - header: `tu_id,count`
 
+By default, `trackclustertu cluster` forms score1 seed clusters and then runs a second-pass score2 containment attachment.
+If `--skip-score2-attachment` is used, the score1 seed clusters are kept as the final TUs.
+
 When `--manifest` is used, `trackclustertu cluster` can also write:
 
 - `*.pooled.bed` (BED6): pooled reads used for clustering
@@ -37,6 +40,27 @@ If `--annotation-bed` is provided, it can also write:
 - `*.tus.anchored.bed12` (BED12 + extra columns): TU “blocks” clipped to overlapping genes
   - extra column `name2`: comma-separated member read IDs, with `|<read_count>` suffix
   - extra column `gene_list`: comma-separated overlapping gene IDs (or `.`)
+- `*.gene_count.csv` (CSV): gene counts table
+  - header: `gene_id,count`
+- `*.gene_sample_matrix.tsv` (TSV): gene-by-sample count matrix
+  - header: `gene_id` plus samples in manifest order
+- `*.gene_group_matrix.tsv` (TSV): gene-by-group count matrix
+  - header: `gene_id` plus groups in first-seen manifest order
+  - written only when the manifest has a non-empty `group` column
+
+## Count-only outputs (from `trackclustertu recount`)
+
+`trackclustertu recount` requires both `--manifest` and `--pooled-membership`.
+It only writes TU count tables and does not write TU interval, membership, pooled BED, annotation, or gene outputs.
+
+With `--out-dir`, the default outputs are:
+
+- `tu_count.csv`
+- `tu_sample_long.tsv`
+- `tu_sample_matrix.tsv`
+- `tu_group_matrix.tsv`
+
+At least one of these count outputs must be requested, either explicitly or through `--out-dir`.
 
 ## Mapping outputs (from `trackclustertu map`)
 
@@ -57,9 +81,18 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 ## Formats / conventions
 
 - Coordinates are **0-based, half-open** intervals: `[start, end)` (BED style).
-- `*.sorted.bed` is BED6: `chrom  start  end  name  score  strand`
+- BED6 outputs such as `bed/<sample>.bed` and `pooled.bed` use:
+  `chrom  start  end  name  score  strand`
 - Membership TSV columns: `read_id  tu_id  score1_to_tu  score2_to_tu`
 - In pooled mode, membership read IDs are tagged as `<sample>::<read_id>`
+
+## Default output directories
+
+If `--out-dir` is omitted:
+
+- single-input `trackclustertu cluster --in reads.bed ...` writes to `reads.trackclustertu/`
+- manifest-based `trackclustertu cluster --manifest samples.tsv ...` writes to `samples.trackclustertu/`
+- `trackclustertu recount --manifest samples.tsv ...` also writes to `samples.trackclustertu/`
 
 ## Re-running TU clustering
 
@@ -69,6 +102,8 @@ Once you have `samples.bed.tsv`, you can re-run clustering without re-mapping:
 trackclustertu cluster \
   --manifest samples.bed.tsv \
   --format bed6 \
+  --score1-threshold 0.95 \
+  --score2-threshold 0.99 \
   --annotation-bed gene.bed \
   --out-dir results
 ```
@@ -105,5 +140,6 @@ trackclustertu recount \
   --manifest samples.tsv \
   --pooled-membership pooled.membership.tsv \
   --out-tu-count shared.tu_count.csv \
-  --out-tu-sample-count-matrix shared.tu_sample_matrix.tsv
+  --out-tu-sample-count-matrix shared.tu_sample_matrix.tsv \
+  --out-tu-group-count-matrix shared.tu_group_matrix.tsv
 ```
