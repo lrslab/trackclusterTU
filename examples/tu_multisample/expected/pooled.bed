@@ -1,0 +1,6 @@
+chr1	100	200	sampleA::r1	0	+
+chr1	101	201	sampleA::r2	0	+
+chr1	300	400	sampleA::r3	0	+
+chr1	120	180	sampleB::r1	0	+
+chr1	300	400	sampleB::r2	0	+
+chr1	500	600	sampleB::r3	0	+
