@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## [0.1.1] - 2026-03-24
+
+### Changed
+
+- Updated the pure Rust `trackclustertu` CLI behavior, docs, tests, and release packaging for the next patch release.
+
 ## [0.1.0] - 2026-01-09
 
 ### Added
