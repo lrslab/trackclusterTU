@@ -76,17 +76,15 @@ fn trackclustertu_filters_low_support_tus() {
         concat!(
             "r1\tTU000001\t1.000000\t1.000000\n",
             "r2\tTU000001\t0.980198\t0.990000\n",
-            "r3\tTU000001\t0.600000\t1.000000\n",
             "r4\tTU000002\t1.000000\t1.000000\n",
             "r5\tTU000002\t0.980198\t0.990000\n",
-            "r6\tTU000002\t0.400000\t1.000000\n",
         )
     );
 
     let count_text = fs::read_to_string(&out_tu_count).unwrap();
     assert_eq!(
         count_text,
-        concat!("tu_id,count\n", "TU000001,3\n", "TU000002,3\n",)
+        concat!("tu_id,count\n", "TU000001,2\n", "TU000002,2\n",)
     );
 
     let _ = fs::remove_dir_all(&tmp);

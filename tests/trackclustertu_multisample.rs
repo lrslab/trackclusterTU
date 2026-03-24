@@ -129,7 +129,7 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         concat!(
             "sampleA::r1\tTU000001\t1.000000\t1.000000\n",
             "sampleA::r2\tTU000001\t0.980198\t0.990000\n",
-            "sampleB::r1\tTU000001\t0.600000\t1.000000\n",
+            "sampleB::r1\tTU000001\t0.600000\t0.600000\n",
             "sampleA::r3\tTU000002\t1.000000\t1.000000\n",
             "sampleB::r2\tTU000002\t1.000000\t1.000000\n",
             "sampleB::r3\tTU000003\t1.000000\t1.000000\n",

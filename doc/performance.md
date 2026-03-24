@@ -31,7 +31,7 @@ Criterion stores historical results under `target/criterion/`.
 ### `benches/clustering.rs`
 
 - Synthetic reads on one `(contig=strand)` partition.
-- Each “seed” produces many near-identical full-length reads (high `score1`) plus one contained truncation (exercises the `score2` attachment pass).
+- Each “seed” produces many near-identical full-length reads (high `score1`) plus one shorter truncation (exercises the length-penalized `score2` second-pass checks).
 - Thresholds: `score1=0.95`, `score2=0.99`.
 
 ## Results (2026-01-09)

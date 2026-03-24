@@ -20,16 +20,23 @@ enum InputFormat {
     Bed6,
     Bed12,
     Tsv,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedInputFormat {
+    Bed6,
+    Bed12,
+    Tsv,
     Fastq,
 }
 
 #[derive(Parser, Debug, Clone)]
 #[command(
-    name = "trackclustertu",
+    name = "trackclustertu cluster",
     version,
     about = "Cluster bacterial directRNA reads into transcript units (TUs)"
 )]
-struct Cli {
+struct ClusterCli {
     /// Single input reads file path.
     #[arg(long = "in", conflicts_with = "manifest")]
     input: Option<PathBuf>,
@@ -37,10 +44,6 @@ struct Cli {
     /// Multi-sample manifest TSV with columns: sample, reads, [group].
     #[arg(long, conflicts_with = "input")]
     manifest: Option<PathBuf>,
-
-    /// Existing pooled membership TSV used to recompute multi-sample counts without reclustering.
-    #[arg(long, requires = "manifest")]
-    pooled_membership: Option<PathBuf>,
 
     /// Input format. Defaults to auto-detecting from file extensions.
     #[arg(long, value_enum, default_value_t = InputFormat::Auto)]
@@ -54,11 +57,11 @@ struct Cli {
     #[arg(long, default_value_t = 0.95)]
     score1_threshold: f64,
 
-    /// score2 threshold (overlap / min_len).
-    #[arg(long, default_value_t = 0.99)]
+    /// score2 threshold (overlap / max_len).
+    #[arg(long, default_value_t = 0.6)]
     score2_threshold: f64,
 
-    /// Skip the second-pass containment attachment and keep score1 seed clusters as final TUs.
+    /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
     #[arg(long)]
     skip_score2_attachment: bool,
 
@@ -135,6 +138,149 @@ struct Cli {
     /// Print a timing breakdown to stderr.
     #[arg(long)]
     timings: bool,
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(
+    name = "trackclustertu recount",
+    version,
+    about = "Recompute TU count tables from pooled membership assignments"
+)]
+struct RecountCli {
+    /// Multi-sample manifest TSV with columns: sample, reads, [group].
+    #[arg(long)]
+    manifest: PathBuf,
+
+    /// Existing pooled membership TSV used to recompute multi-sample counts without reclustering.
+    #[arg(long)]
+    pooled_membership: PathBuf,
+
+    /// Output directory. Missing output paths default to files inside this directory.
+    #[arg(long)]
+    out_dir: Option<PathBuf>,
+
+    /// Optional TU expression CSV (`tu_id,count`).
+    #[arg(long)]
+    out_tu_count: Option<PathBuf>,
+
+    /// Optional per-sample TU long table (`tu_id, sample, count` as TSV).
+    #[arg(long)]
+    out_tu_sample_count_long: Option<PathBuf>,
+
+    /// Optional per-sample TU matrix (`tu_id` + manifest-order sample columns as TSV).
+    #[arg(long)]
+    out_tu_sample_count_matrix: Option<PathBuf>,
+
+    /// Optional per-group TU matrix (`tu_id` + group columns as TSV).
+    ///
+    /// This file is only written when the manifest has a non-empty `group` column.
+    #[arg(long)]
+    out_tu_group_count_matrix: Option<PathBuf>,
+
+    /// Optional minimum reads per TU (filters outputs).
+    #[arg(long)]
+    min_tu_count: Option<u64>,
+
+    /// Number of worker threads to use (default: all logical CPUs).
+    #[arg(long)]
+    threads: Option<usize>,
+
+    /// Print a timing breakdown to stderr.
+    #[arg(long)]
+    timings: bool,
+}
+
+#[derive(Debug, Clone)]
+struct Cli {
+    input: Option<PathBuf>,
+    manifest: Option<PathBuf>,
+    pooled_membership: Option<PathBuf>,
+    format: InputFormat,
+    out_dir: Option<PathBuf>,
+    score1_threshold: f64,
+    score2_threshold: f64,
+    skip_score2_attachment: bool,
+    min_read_len: Option<u32>,
+    out_tu: Option<PathBuf>,
+    out_membership: Option<PathBuf>,
+    out_pooled_reads: Option<PathBuf>,
+    out_tu_count: Option<PathBuf>,
+    out_tu_sample_count_long: Option<PathBuf>,
+    out_tu_sample_count_matrix: Option<PathBuf>,
+    out_tu_group_count_matrix: Option<PathBuf>,
+    min_tu_count: Option<u64>,
+    annotation_bed: Option<PathBuf>,
+    out_tu_gene: Option<PathBuf>,
+    out_tu_bed12: Option<PathBuf>,
+    out_gene_count: Option<PathBuf>,
+    out_gene_sample_count_matrix: Option<PathBuf>,
+    out_gene_group_count_matrix: Option<PathBuf>,
+    threads: Option<usize>,
+    timings: bool,
+}
+
+impl From<ClusterCli> for Cli {
+    fn from(cli: ClusterCli) -> Self {
+        Self {
+            input: cli.input,
+            manifest: cli.manifest,
+            pooled_membership: None,
+            format: cli.format,
+            out_dir: cli.out_dir,
+            score1_threshold: cli.score1_threshold,
+            score2_threshold: cli.score2_threshold,
+            skip_score2_attachment: cli.skip_score2_attachment,
+            min_read_len: cli.min_read_len,
+            out_tu: cli.out_tu,
+            out_membership: cli.out_membership,
+            out_pooled_reads: cli.out_pooled_reads,
+            out_tu_count: cli.out_tu_count,
+            out_tu_sample_count_long: cli.out_tu_sample_count_long,
+            out_tu_sample_count_matrix: cli.out_tu_sample_count_matrix,
+            out_tu_group_count_matrix: cli.out_tu_group_count_matrix,
+            min_tu_count: cli.min_tu_count,
+            annotation_bed: cli.annotation_bed,
+            out_tu_gene: cli.out_tu_gene,
+            out_tu_bed12: cli.out_tu_bed12,
+            out_gene_count: cli.out_gene_count,
+            out_gene_sample_count_matrix: cli.out_gene_sample_count_matrix,
+            out_gene_group_count_matrix: cli.out_gene_group_count_matrix,
+            threads: cli.threads,
+            timings: cli.timings,
+        }
+    }
+}
+
+impl From<RecountCli> for Cli {
+    fn from(cli: RecountCli) -> Self {
+        Self {
+            input: None,
+            manifest: Some(cli.manifest),
+            pooled_membership: Some(cli.pooled_membership),
+            format: InputFormat::Auto,
+            out_dir: cli.out_dir,
+            score1_threshold: 0.95,
+            score2_threshold: 0.6,
+            skip_score2_attachment: false,
+            min_read_len: None,
+            out_tu: None,
+            out_membership: None,
+            out_pooled_reads: None,
+            out_tu_count: cli.out_tu_count,
+            out_tu_sample_count_long: cli.out_tu_sample_count_long,
+            out_tu_sample_count_matrix: cli.out_tu_sample_count_matrix,
+            out_tu_group_count_matrix: cli.out_tu_group_count_matrix,
+            min_tu_count: cli.min_tu_count,
+            annotation_bed: None,
+            out_tu_gene: None,
+            out_tu_bed12: None,
+            out_gene_count: None,
+            out_gene_sample_count_matrix: None,
+            out_gene_group_count_matrix: None,
+            threads: cli.threads,
+            timings: cli.timings,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -393,62 +539,68 @@ fn read_tsv(path: &Path) -> anyhow::Result<Vec<ReadRecord>> {
     Ok(reads)
 }
 
-fn read_reads(path: &Path, format: InputFormat) -> anyhow::Result<Vec<ReadRecord>> {
+fn resolve_explicit_input_format(format: InputFormat) -> Option<ResolvedInputFormat> {
     match format {
-        InputFormat::Auto => {
-            anyhow::bail!("input format must be resolved before reading tracks")
-        }
-        InputFormat::Bed6 => read_bed6(path),
-        InputFormat::Bed12 => read_bed12(path),
-        InputFormat::Tsv => read_tsv(path),
-        InputFormat::Fastq => anyhow::bail!(
+        InputFormat::Auto => None,
+        InputFormat::Bed6 => Some(ResolvedInputFormat::Bed6),
+        InputFormat::Bed12 => Some(ResolvedInputFormat::Bed12),
+        InputFormat::Tsv => Some(ResolvedInputFormat::Tsv),
+    }
+}
+
+fn read_reads(path: &Path, format: ResolvedInputFormat) -> anyhow::Result<Vec<ReadRecord>> {
+    match format {
+        ResolvedInputFormat::Bed6 => read_bed6(path),
+        ResolvedInputFormat::Bed12 => read_bed12(path),
+        ResolvedInputFormat::Tsv => read_tsv(path),
+        ResolvedInputFormat::Fastq => anyhow::bail!(
             "FASTQ inputs are not supported directly; use `trackclustertu map` or `trackclustertu run`, or convert sorted BAMs with `trackclustertu bam-to-bed` before clustering"
         ),
     }
 }
 
-fn infer_format_from_path(path: &Path) -> Option<InputFormat> {
+fn infer_format_from_path(path: &Path) -> Option<ResolvedInputFormat> {
     let file_name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
     if file_name.ends_with(".fastq")
         || file_name.ends_with(".fq")
         || file_name.ends_with(".fastq.gz")
         || file_name.ends_with(".fq.gz")
     {
-        return Some(InputFormat::Fastq);
+        return Some(ResolvedInputFormat::Fastq);
     }
     if file_name.ends_with(".bed12") {
-        return Some(InputFormat::Bed12);
+        return Some(ResolvedInputFormat::Bed12);
     }
     if file_name.ends_with(".bed") {
-        return Some(InputFormat::Bed6);
+        return Some(ResolvedInputFormat::Bed6);
     }
     if file_name.ends_with(".tsv") || file_name.ends_with(".txt") {
-        return Some(InputFormat::Tsv);
+        return Some(ResolvedInputFormat::Tsv);
     }
     None
 }
 
-fn resolve_single_input_format(cli: &Cli) -> anyhow::Result<InputFormat> {
-    if cli.format != InputFormat::Auto {
-        return Ok(cli.format);
+fn resolve_single_input_format(cli: &Cli) -> anyhow::Result<ResolvedInputFormat> {
+    if let Some(format) = resolve_explicit_input_format(cli.format) {
+        return Ok(format);
     }
 
     let input = cli
         .input
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("single-input mode requires --in"))?;
-    Ok(infer_format_from_path(input).unwrap_or(InputFormat::Bed6))
+    Ok(infer_format_from_path(input).unwrap_or(ResolvedInputFormat::Bed6))
 }
 
 fn resolve_manifest_input_format(
     cli: &Cli,
     samples: &[SampleManifestRecord],
-) -> anyhow::Result<InputFormat> {
-    if cli.format != InputFormat::Auto {
-        return Ok(cli.format);
+) -> anyhow::Result<ResolvedInputFormat> {
+    if let Some(format) = resolve_explicit_input_format(cli.format) {
+        return Ok(format);
     }
 
-    let mut inferred: Option<InputFormat> = None;
+    let mut inferred: Option<ResolvedInputFormat> = None;
     for sample in samples {
         let Some(sample_format) = infer_format_from_path(&sample.reads) else {
             continue;
@@ -465,7 +617,7 @@ fn resolve_manifest_input_format(
         }
     }
 
-    Ok(inferred.unwrap_or(InputFormat::Bed6))
+    Ok(inferred.unwrap_or(ResolvedInputFormat::Bed6))
 }
 
 fn read_annotation_bed6(path: &Path) -> anyhow::Result<Vec<GeneRecord>> {
@@ -710,7 +862,7 @@ fn want_any_tu_count_outputs(cli: &Cli) -> bool {
 
 fn load_manifest_reads(
     samples: &[SampleManifestRecord],
-    format: InputFormat,
+    format: ResolvedInputFormat,
 ) -> anyhow::Result<Vec<ReadRecord>> {
     let mut pooled_reads: Vec<ReadRecord> = Vec::new();
 
@@ -1152,13 +1304,14 @@ fn run_cluster_mode(
         Some(samples) => {
             let manifest_format = resolve_manifest_input_format(cli, samples)?;
             match manifest_format {
-                InputFormat::Bed6 | InputFormat::Bed12 | InputFormat::Tsv => {
+                ResolvedInputFormat::Bed6
+                | ResolvedInputFormat::Bed12
+                | ResolvedInputFormat::Tsv => {
                     load_manifest_reads(samples, manifest_format)?
                 }
-                InputFormat::Fastq => anyhow::bail!(
+                ResolvedInputFormat::Fastq => anyhow::bail!(
                     "manifest `reads` entries cannot be FASTQ here; use `trackclustertu map` or `trackclustertu run`, or preprocess each FASTQ to BED6 before calling `trackclustertu cluster`"
                 ),
-                InputFormat::Auto => unreachable!("manifest input format should be resolved"),
             }
         }
         None => {
@@ -1529,11 +1682,8 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let cli = Cli::parse_from(args);
-    if cli.pooled_membership.is_some() {
-        anyhow::bail!("`trackclustertu cluster` does not accept --pooled-membership; use `trackclustertu recount` instead");
-    }
-    run_cli(cli)
+    let cli = ClusterCli::parse_from(args);
+    run_cli(cli.into())
 }
 
 pub(crate) fn run_recount_from_args<I, T>(args: I) -> anyhow::Result<()>
@@ -1541,12 +1691,6 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let cli = Cli::parse_from(args);
-    if cli.pooled_membership.is_none() {
-        anyhow::bail!("`trackclustertu recount` requires --pooled-membership");
-    }
-    if cli.input.is_some() {
-        anyhow::bail!("`trackclustertu recount` does not accept --in; pass --manifest instead");
-    }
-    run_cli(cli)
+    let cli = RecountCli::parse_from(args);
+    run_cli(cli.into())
 }

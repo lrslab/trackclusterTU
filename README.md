@@ -17,9 +17,9 @@ Reads are clustered into candidate transcript units using overlap-based similari
 ### Similarity Metrics
 
 - `score1` (Jaccard-like): `overlap / union`
-- `score2` (containment-like): `overlap / min(lenA, lenB)`
+- `score2` (length-penalized overlap): `overlap / max(lenA, lenB)`
 
-By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to attach truncated reads.
+By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to merge only very similar seed clusters without treating strong short/long containment as a perfect match.
 If you want to keep the score1 seed clusters as the final TUs, pass `--skip-score2-attachment`.
 
 ## Install
@@ -139,6 +139,7 @@ sampleB	treated	data/sampleB.fastq.gz
 - `group` is optional
 
 Relative `reads` paths are resolved relative to the manifest file.
+Sample names must remain unique after replacing non-filename characters with `_`, because output BAM/BED/log filenames are derived from them.
 
 ### Step 2: Run The Whole Pipeline
 
@@ -155,13 +156,20 @@ This writes:
 - `results/bam/<sample>.sorted.bam`
 - `results/bam/<sample>.sorted.bam.bai`
 - `results/bed/<sample>.bed`
+- `results/logs/<sample>.*.log`
 - `results/samples.bam.tsv`
 - `results/samples.bed.tsv`
 - `results/annotation.bed` when `--annotation-gff` is used
 - `results/tus.bed`
 - `results/membership.tsv`
+- `results/pooled.bed` in manifest mode
 - `results/tu_count.csv`
+- `results/tu_sample_long.tsv` in manifest mode
+- `results/tu_sample_matrix.tsv` in manifest mode
+- `results/tu_group_matrix.tsv` in manifest mode when groups exist
 - `results/gene_count.csv` with annotation
+- `results/gene_sample_matrix.tsv` in manifest mode with annotation
+- `results/gene_group_matrix.tsv` in manifest mode with annotation when groups exist
 
 ### Step 3: Optionally Run Stages Separately
 
@@ -192,12 +200,12 @@ trackclustertu cluster \
   --manifest mapped/samples.bed.tsv \
   --format bed6 \
   --score1-threshold 0.95 \
-  --score2-threshold 0.99 \
+  --score2-threshold 0.6 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
 
-The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.99`.
+The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.6`.
 
 ```bash
 trackclustertu recount \
@@ -218,8 +226,8 @@ trackclustertu recount \
 - `tu_gene.tsv` with annotation
 - `tus.anchored.bed12` with annotation
 - `gene_count.csv` with annotation
-- `gene_sample_matrix.tsv` with annotation and manifest mode
-- `gene_group_matrix.tsv` with annotation and group-aware manifest mode
+- `gene_sample_matrix.tsv` in manifest mode with annotation
+- `gene_group_matrix.tsv` in manifest mode with annotation when groups exist
 
 ## Input Formats
 

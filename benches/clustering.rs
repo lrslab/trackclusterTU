@@ -31,7 +31,7 @@ fn make_reads(total_reads: usize, reads_per_seed: usize) -> Vec<ReadRecord> {
             });
         }
 
-        // One contained truncation to exercise the score2 attachment pass.
+        // One shorter truncation to exercise the length-penalized score2 second-pass checks.
         reads.push(ReadRecord {
             contig: "chr1".to_owned(),
             strand: Strand::Plus,

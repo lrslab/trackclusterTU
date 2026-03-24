@@ -69,11 +69,11 @@ struct RunCli {
     #[arg(long, default_value_t = 0.95)]
     score1_threshold: f64,
 
-    /// score2 threshold (overlap / min_len).
-    #[arg(long, default_value_t = 0.99)]
+    /// score2 threshold (overlap / max_len).
+    #[arg(long, default_value_t = 0.6)]
     score2_threshold: f64,
 
-    /// Skip the second-pass containment attachment and keep score1 seed clusters as final TUs.
+    /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
     #[arg(long)]
     skip_score2_attachment: bool,
 
@@ -153,9 +153,11 @@ struct BamToBedCli {
     about = "Convert GFF3 gene annotations to BED6"
 )]
 struct GffToBedCli {
+    /// Input GFF3 annotation file.
     #[arg(long = "annotation-gff", alias = "gff")]
     annotation_gff: PathBuf,
 
+    /// Output BED6 path.
     #[arg(long = "out-bed")]
     out_bed: PathBuf,
 }
@@ -346,6 +348,7 @@ fn run_map(cli: &MapCli) -> Result<PathBuf> {
 
     let records = parse_manifest(&cli.manifest)
         .with_context(|| format!("failed to parse FASTQ manifest {:?}", cli.manifest))?;
+    crate::tools::bam_to_bed::validate_unique_sanitized_sample_names(&records)?;
 
     fs::create_dir_all(&cli.out_dir)
         .with_context(|| format!("failed to create output directory {:?}", cli.out_dir))?;

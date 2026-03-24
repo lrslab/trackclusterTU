@@ -164,13 +164,12 @@ fn write_gene_bed6_to_writer<W: Write>(
     for gene in genes {
         writeln!(
             writer,
-            "{}\t{}\t{}\t{}\t.\t{}\t{}",
+            "{}\t{}\t{}\t{}\t0\t{}",
             gene.contig,
             gene.interval.start.get(),
             gene.interval.end.get(),
             gene.id,
-            gene.strand.as_char(),
-            gene.feature_kind
+            gene.strand.as_char()
         )?;
     }
     Ok(())

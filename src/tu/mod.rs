@@ -722,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn clusters_and_attaches_truncations() {
+    fn default_score2_avoids_overmerging_short_contained_reads() {
         let reads = vec![
             read("chr1", Strand::Plus, 120, 180, "r3"),
             read("chr1", Strand::Plus, 100, 200, "r1"),
@@ -734,7 +734,7 @@ mod tests {
         ];
 
         let result = cluster_tus(&reads, 0.95, 0.99).unwrap();
-        assert_eq!(result.tus.len(), 3);
+        assert_eq!(result.tus.len(), 5);
 
         assert_eq!(
             result.tus[0],
@@ -752,14 +752,34 @@ mod tests {
                 id: "TU000002".to_owned(),
                 contig: "chr1".to_owned(),
                 strand: Strand::Plus,
-                interval: Interval::new(Coord::new(300), Coord::new(400)).unwrap(),
-                rep_read_index: 3,
+                interval: Interval::new(Coord::new(120), Coord::new(180)).unwrap(),
+                rep_read_index: 0,
             }
         );
         assert_eq!(
             result.tus[2],
             Tu {
                 id: "TU000003".to_owned(),
+                contig: "chr1".to_owned(),
+                strand: Strand::Plus,
+                interval: Interval::new(Coord::new(300), Coord::new(400)).unwrap(),
+                rep_read_index: 3,
+            }
+        );
+        assert_eq!(
+            result.tus[3],
+            Tu {
+                id: "TU000004".to_owned(),
+                contig: "chr1".to_owned(),
+                strand: Strand::Plus,
+                interval: Interval::new(Coord::new(320), Coord::new(360)).unwrap(),
+                rep_read_index: 5,
+            }
+        );
+        assert_eq!(
+            result.tus[4],
+            Tu {
+                id: "TU000005".to_owned(),
                 contig: "chr1".to_owned(),
                 strand: Strand::Minus,
                 interval: Interval::new(Coord::new(100), Coord::new(200)).unwrap(),
@@ -775,11 +795,33 @@ mod tests {
 
         assert_eq!(by_id["r1"], "TU000001");
         assert_eq!(by_id["r2"], "TU000001");
+        assert_eq!(by_id["r3"], "TU000002");
+        assert_eq!(by_id["r4"], "TU000003");
+        assert_eq!(by_id["r5"], "TU000003");
+        assert_eq!(by_id["r6"], "TU000004");
+        assert_eq!(by_id["r7"], "TU000005");
+    }
+
+    #[test]
+    fn score2_can_attach_near_full_length_reads_when_threshold_is_relaxed() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 108, 200, "r3"),
+            read("chr1", Strand::Plus, 100, 200, "r1"),
+            read("chr1", Strand::Plus, 101, 201, "r2"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.90).unwrap();
+        assert_eq!(result.tus.len(), 1);
+
+        let mut by_id: HashMap<String, String> = HashMap::new();
+        for (read_idx, read) in reads.iter().enumerate() {
+            let tu_id = &result.tus[result.read_to_tu[read_idx]].id;
+            by_id.insert(read.id.clone(), tu_id.clone());
+        }
+
+        assert_eq!(by_id["r1"], "TU000001");
+        assert_eq!(by_id["r2"], "TU000001");
         assert_eq!(by_id["r3"], "TU000001");
-        assert_eq!(by_id["r4"], "TU000002");
-        assert_eq!(by_id["r5"], "TU000002");
-        assert_eq!(by_id["r6"], "TU000002");
-        assert_eq!(by_id["r7"], "TU000003");
     }
 
     #[test]

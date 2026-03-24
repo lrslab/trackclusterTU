@@ -181,3 +181,48 @@ fn trackclustertu_bam_to_bed_subcommand_converts_primary_alignments_to_bed6() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn trackclustertu_bam_to_bed_manifest_rejects_sanitized_name_collisions() {
+    let tmp = unique_tmp_dir("trackclustertu_bam_to_bed_collision_test");
+    fs::create_dir_all(&tmp).unwrap();
+
+    let manifest_path = tmp.join("samples.tsv");
+    fs::write(
+        &manifest_path,
+        concat!(
+            "sample\treads\n",
+            "sample a\tmissing1.bam\n",
+            "sample/a\tmissing2.bam\n",
+        ),
+    )
+    .unwrap();
+
+    let out_dir = tmp.join("out");
+    let exe = env!("CARGO_BIN_EXE_trackclustertu");
+    let output = Command::new(exe)
+        .args([
+            "bam-to-bed",
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("filename sanitization") && stderr.contains("sample a"),
+        "stderr did not explain sample-name collision:\n{stderr}",
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}

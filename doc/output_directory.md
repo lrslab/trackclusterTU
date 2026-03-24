@@ -18,7 +18,7 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 - `*.tu_count.csv` (CSV): TU counts table
   - header: `tu_id,count`
 
-By default, `trackclustertu cluster` forms score1 seed clusters and then runs a second-pass score2 containment attachment.
+By default, `trackclustertu cluster` forms score1 seed clusters and then runs a second-pass score2 merge that penalizes large short/long differences.
 If `--skip-score2-attachment` is used, the score1 seed clusters are kept as the final TUs.
 
 When `--manifest` is used, `trackclustertu cluster` can also write:
@@ -68,6 +68,10 @@ The mapping stage writes:
 
 - `bam/<sample>.sorted.bam`: sorted BAM for each FASTQ
 - `bam/<sample>.sorted.bam.bai`: BAM index
+- `logs/<sample>.minimap2.log`: minimap2 stderr
+- `logs/<sample>.samtools_view.log`: `samtools view` stderr
+- `logs/<sample>.samtools_sort.log`: `samtools sort` stderr
+- `logs/<sample>.samtools_index.log`: `samtools index` stderr
 - `samples.bam.tsv`: BAM manifest for later conversion/reuse
 - `bed/<sample>.bed`: BED6 reads track used for clustering
 - `samples.bed.tsv`: BED manifest for `trackclustertu cluster`
@@ -91,8 +95,13 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 If `--out-dir` is omitted:
 
 - single-input `trackclustertu cluster --in reads.bed ...` writes to `reads.trackclustertu/`
-- manifest-based `trackclustertu cluster --manifest samples.tsv ...` writes to `samples.trackclustertu/`
-- `trackclustertu recount --manifest samples.tsv ...` also writes to `samples.trackclustertu/`
+- manifest-based `trackclustertu cluster --manifest <manifest> ...` writes to `<manifest-stem>.trackclustertu/`
+- `trackclustertu recount --manifest <manifest> ...` uses the same default directory naming
+
+Examples:
+
+- `samples.tsv` -> `samples.trackclustertu/`
+- `samples.bed.tsv` -> `samples.bed.trackclustertu/`
 
 ## Re-running TU clustering
 
@@ -103,7 +112,7 @@ trackclustertu cluster \
   --manifest samples.bed.tsv \
   --format bed6 \
   --score1-threshold 0.95 \
-  --score2-threshold 0.99 \
+  --score2-threshold 0.6 \
   --annotation-bed gene.bed \
   --out-dir results
 ```

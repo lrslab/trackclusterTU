@@ -52,9 +52,9 @@ fn trackclustertu_gff_to_bed_subcommand_converts_gene_features() {
     assert_eq!(
         fs::read_to_string(&out_bed).unwrap(),
         concat!(
-            "chr1\t10\t50\tgeneA\t.\t+\tmRNA\n",
-            "chr1\t60\t100\tb0002\t.\t-\tgene\n",
-            "chr2\t4\t20\tid3\t.\t+\tgene\n",
+            "chr1\t10\t50\tgeneA\t0\t+\n",
+            "chr1\t60\t100\tb0002\t0\t-\n",
+            "chr2\t4\t20\tid3\t0\t+\n",
         )
     );
 

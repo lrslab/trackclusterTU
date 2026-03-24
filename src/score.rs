@@ -13,11 +13,11 @@ pub fn score1_interval(a: Interval, b: Interval) -> f64 {
 
 pub fn score2_interval(a: Interval, b: Interval) -> f64 {
     let overlap = a.overlap_len(b) as u64;
-    let min_len = (a.len() as u64).min(b.len() as u64);
-    if min_len == 0 {
+    let max_len = (a.len() as u64).max(b.len() as u64);
+    if max_len == 0 {
         0.0
     } else {
-        overlap as f64 / min_len as f64
+        overlap as f64 / max_len as f64
     }
 }
 
@@ -33,11 +33,11 @@ pub fn score1_intervals(a: &[Interval], b: &[Interval]) -> f64 {
 
 pub fn score2_intervals(a: &[Interval], b: &[Interval]) -> f64 {
     let overlap = intersection_len(a, b);
-    let min_len = total_len(a).min(total_len(b));
-    if min_len == 0 {
+    let max_len = total_len(a).max(total_len(b));
+    if max_len == 0 {
         0.0
     } else {
-        overlap as f64 / min_len as f64
+        overlap as f64 / max_len as f64
     }
 }
 
@@ -77,11 +77,11 @@ pub fn score2_transcripts(a: &Transcript, b: &Transcript, intron_weight: f64) ->
     let exon_len_b = total_len(&b.exons) as f64;
 
     if intron_weight == 0.0 {
-        let min_len = exon_len_a.min(exon_len_b);
-        if min_len == 0.0 {
+        let max_len = exon_len_a.max(exon_len_b);
+        if max_len == 0.0 {
             0.0
         } else {
-            exon_overlap / min_len
+            exon_overlap / max_len
         }
     } else {
         let a_introns = a.introns();
@@ -94,11 +94,11 @@ pub fn score2_transcripts(a: &Transcript, b: &Transcript, intron_weight: f64) ->
         let overlap = exon_overlap + intron_weight * intron_overlap;
         let len_a = exon_len_a + intron_weight * intron_len_a;
         let len_b = exon_len_b + intron_weight * intron_len_b;
-        let min_len = len_a.min(len_b);
-        if min_len == 0.0 {
+        let max_len = len_a.max(len_b);
+        if max_len == 0.0 {
             0.0
         } else {
-            overlap / min_len
+            overlap / max_len
         }
     }
 }
@@ -128,11 +128,11 @@ mod tests {
     }
 
     #[test]
-    fn score2_interval_is_one_for_containment() {
+    fn score2_interval_penalizes_containment_by_length_ratio() {
         let a = interval(0, 10);
         let b = interval(2, 8);
-        assert_eq!(score2_interval(a, b), 1.0);
-        assert_eq!(score2_interval(b, a), 1.0);
+        assert_eq!(score2_interval(a, b), 0.6);
+        assert_eq!(score2_interval(b, a), 0.6);
         assert_eq!(score1_interval(a, b), 0.6);
     }
 
@@ -181,5 +181,14 @@ mod tests {
             score2_transcripts(&a, &b, 0.0),
             score2_transcripts(&b, &a, 0.0)
         );
+    }
+
+    #[test]
+    fn score2_transcripts_penalize_containment_by_length_ratio() {
+        let a = make_tx("a", &[(0, 10)]);
+        let b = make_tx("b", &[(2, 8)]);
+
+        assert_eq!(score2_transcripts(&a, &b, 0.0), 0.6);
+        assert_eq!(score2_transcripts(&b, &a, 0.0), 0.6);
     }
 }
