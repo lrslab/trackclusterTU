@@ -40,3 +40,6 @@ pip-delete-this-directory.txt
 
 # Rust
 /target/
+
+# MacOS specific
+.DS_Store

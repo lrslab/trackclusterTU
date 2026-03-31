@@ -13,6 +13,7 @@ This repository ships the Rust `trackclustertu` CLI.
 
 For bacteria, each mapped read is treated primarily as a single genomic interval `[start, end)` using 0-based, half-open coordinates.
 Reads are clustered into candidate transcript units using overlap-based similarity.
+When the input is BED12, clustering intentionally uses only the outer transcript span `[tx_start, tx_end)`; exon blocks do not affect `score1` or `score2`.
 
 ### Similarity Metrics
 
@@ -232,5 +233,5 @@ trackclustertu recount \
 ## Input Formats
 
 - `bed6`: `chrom  start  end  name  score  strand`
-- `bed12`: transcript span `[tx_start, tx_end)` is used for TU clustering
+- `bed12`: transcript span `[tx_start, tx_end)` is used for TU clustering; BED12 block structure is ignored by clustering
 - `tsv`: `contig  start  end  id  strand`

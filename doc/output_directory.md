@@ -20,6 +20,7 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 
 By default, `trackclustertu cluster` forms score1 seed clusters and then runs a second-pass score2 merge that penalizes large short/long differences.
 If `--skip-score2-attachment` is used, the score1 seed clusters are kept as the final TUs.
+Clustering is span-based: when the input is BED12, only the outer transcript interval `[tx_start, tx_end)` participates in `score1` and `score2`.
 
 When `--manifest` is used, `trackclustertu cluster` can also write:
 

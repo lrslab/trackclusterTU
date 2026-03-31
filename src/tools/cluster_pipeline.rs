@@ -472,6 +472,8 @@ fn read_bed12(path: &Path) -> anyhow::Result<Vec<ReadRecord>> {
     let mut reads: Vec<ReadRecord> = Vec::new();
     for result in reader {
         let tx = result?;
+        // TU clustering is intentionally span-based, so BED12 block structure is
+        // collapsed to the outer transcript interval here.
         reads.push(ReadRecord {
             contig: tx.chrom,
             strand: tx.strand,
