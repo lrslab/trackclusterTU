@@ -136,6 +136,11 @@ CLI tests should also cover the new flag surface where appropriate:
 - `trackclustertu cluster --help` mentions `--three-prime-tolerance-bp`
 - `trackclustertu run` forwards the option into the cluster subcommand arguments
 
+Implementation should include these tests as part of the code change, not as a follow-up.
+After implementation, run the relevant Rust test targets to verify the new regression coverage and confirm the new CLI flag is wired correctly.
+
+If practical within the existing test structure, prefer one regression that mirrors the reported biological case closely enough to protect against this exact failure mode, rather than relying only on abstract synthetic intervals.
+
 ## Documentation
 
 Update:
