@@ -73,6 +73,10 @@ struct RunCli {
     #[arg(long, default_value_t = 0.6)]
     score2_threshold: f64,
 
+    /// Allowed strand-aware 3 prime mismatch during second-pass score2 attachment (bp).
+    #[arg(long, default_value_t = 12)]
+    three_prime_tolerance_bp: u32,
+
     /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
     #[arg(long)]
     skip_score2_attachment: bool,
@@ -505,6 +509,11 @@ fn run_full_pipeline(cli: &RunCli) -> Result<()> {
         &mut cluster_args,
         "--score2-threshold",
         Some(cli.score2_threshold),
+    );
+    push_optional_arg(
+        &mut cluster_args,
+        "--three-prime-tolerance-bp",
+        Some(cli.three_prime_tolerance_bp),
     );
     if cli.skip_score2_attachment {
         cluster_args.push(OsString::from("--skip-score2-attachment"));

@@ -384,3 +384,140 @@ esac
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn trackclustertu_run_forwards_three_prime_tolerance_to_cluster() {
+    let tmp = unique_tmp_dir("trackclustertu_run_three_prime_tolerance");
+    let tools_dir = tmp.join("bin");
+    let out_dir = tmp.join("out");
+    fs::create_dir_all(&tools_dir).unwrap();
+    fs::create_dir_all(&out_dir).unwrap();
+
+    let fixture_bam = tmp.join("fixture.bam");
+    let header = build_header();
+    let mut writer = bam::io::Writer::new(fs::File::create(&fixture_bam).unwrap());
+    writer.write_header(&header).unwrap();
+    writer
+        .write_alignment_record(
+            &header,
+            &mapped_record("parent", 100, match_cigar(105), 60, false),
+        )
+        .unwrap();
+    writer
+        .write_alignment_record(
+            &header,
+            &mapped_record("child", 112, match_cigar(98), 55, false),
+        )
+        .unwrap();
+    writer.try_finish().unwrap();
+
+    let minimap2 = tools_dir.join("minimap2");
+    fs::write(&minimap2, "#!/bin/sh\nprintf 'fake-sam\\n'\n").unwrap();
+    make_executable(&minimap2);
+
+    let samtools = tools_dir.join("samtools");
+    fs::write(
+        &samtools,
+        r#"#!/bin/sh
+cmd="$1"
+shift
+case "$cmd" in
+  view)
+    cat
+    ;;
+  sort)
+    out=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -o)
+          out="$2"
+          shift 2
+          ;;
+        -@)
+          shift 2
+          ;;
+        -)
+          shift
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    cat >/dev/null
+    cp "$FAKE_BAM_PATH" "$out"
+    ;;
+  index)
+    bam="$1"
+    : > "${bam}.bai"
+    ;;
+  *)
+    echo "unexpected samtools command: $cmd" >&2
+    exit 1
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    make_executable(&samtools);
+
+    let reference_fasta = tmp.join("ref.fa");
+    fs::write(&reference_fasta, ">chr1\nACGTACGTACGTACGT\n").unwrap();
+
+    let fastq = tmp.join("sampleA.fastq");
+    fs::write(&fastq, "@r1\nACGTACGT\n+\nIIIIIIII\n").unwrap();
+
+    let manifest = tmp.join("samples.fastq.tsv");
+    fs::write(
+        &manifest,
+        format!(
+            "sample\tgroup\treads\nsampleA\tcontrol\t{}\n",
+            fastq.display()
+        ),
+    )
+    .unwrap();
+
+    let exe = env!("CARGO_BIN_EXE_trackclustertu");
+    let original_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut path_parts = vec![tools_dir.clone()];
+    path_parts.extend(std::env::split_paths(&original_path));
+    let joined_path = std::env::join_paths(path_parts).unwrap();
+
+    let output = Command::new(exe)
+        .env("PATH", joined_path)
+        .env("FAKE_BAM_PATH", &fixture_bam)
+        .args([
+            "run",
+            "--manifest",
+            manifest.to_str().unwrap(),
+            "--reference-fasta",
+            reference_fasta.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--three-prime-tolerance-bp",
+            "0",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(
+        fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
+        concat!(
+            "chr1\t100\t205\tTU000001\t0\t+\n",
+            "chr1\t112\t210\tTU000002\t0\t+\n",
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(out_dir.join("tu_count.csv")).unwrap(),
+        concat!("tu_id,count\n", "TU000001,1\n", "TU000002,1\n",)
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}

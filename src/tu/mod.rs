@@ -43,12 +43,14 @@ pub struct TuClusteringStats {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TuClusteringOptions {
     pub attach_contained_reads: bool,
+    pub three_prime_tolerance_bp: u32,
 }
 
 impl Default for TuClusteringOptions {
     fn default() -> Self {
         Self {
             attach_contained_reads: true,
+            three_prime_tolerance_bp: 12,
         }
     }
 }
@@ -277,6 +279,22 @@ fn resolve_root(cluster_idx: usize, parents: &mut [Option<usize>]) -> usize {
     current
 }
 
+fn candidate_within_three_prime_tolerance(
+    child: &ReadRecord,
+    candidate: &ReadRecord,
+    tolerance_bp: u32,
+) -> bool {
+    match child.strand {
+        Strand::Plus | Strand::Unknown => {
+            candidate.interval.end.get().saturating_add(tolerance_bp) >= child.interval.end.get()
+        }
+        Strand::Minus => {
+            candidate.interval.start.get()
+                <= child.interval.start.get().saturating_add(tolerance_bp)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TuNoId {
     contig: String,
@@ -378,7 +396,11 @@ fn cluster_tus_region(
                     continue;
                 }
 
-                if candidate.interval.end < child.interval.end {
+                if !candidate_within_three_prime_tolerance(
+                    child,
+                    candidate,
+                    options.three_prime_tolerance_bp,
+                ) {
                     continue;
                 }
 
@@ -825,6 +847,39 @@ mod tests {
     }
 
     #[test]
+    fn default_three_prime_tolerance_merges_plus_strand_near_matches() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 100, 205, "parent"),
+            read("chr1", Strand::Plus, 112, 210, "child"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.60).unwrap();
+        assert_eq!(result.tus.len(), 1);
+    }
+
+    #[test]
+    fn default_three_prime_tolerance_merges_minus_strand_near_matches() {
+        let reads = vec![
+            read("chr1", Strand::Minus, 100, 205, "parent"),
+            read("chr1", Strand::Minus, 108, 210, "child"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.60).unwrap();
+        assert_eq!(result.tus.len(), 1);
+    }
+
+    #[test]
+    fn three_prime_gap_beyond_tolerance_stays_split() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 100, 205, "parent"),
+            read("chr1", Strand::Plus, 120, 218, "child"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.60).unwrap();
+        assert_eq!(result.tus.len(), 2);
+    }
+
+    #[test]
     fn score1_only_keeps_contained_reads_as_separate_tus() {
         let reads = vec![
             read("chr1", Strand::Plus, 120, 180, "r3"),
@@ -842,6 +897,7 @@ mod tests {
             0.99,
             TuClusteringOptions {
                 attach_contained_reads: false,
+                ..TuClusteringOptions::default()
             },
         )
         .unwrap();

@@ -175,6 +175,57 @@ fn trackclustertu_can_skip_score2_attachment() {
 }
 
 #[test]
+fn trackclustertu_cluster_can_override_three_prime_tolerance() {
+    let tmp = unique_tmp_dir("trackclustertu_test_three_prime_tolerance");
+    fs::create_dir_all(&tmp).unwrap();
+
+    let input_path = tmp.join("reads.bed");
+    let out_tu = tmp.join("tu.bed");
+
+    let mut input = fs::File::create(&input_path).unwrap();
+    writeln!(input, "chr1\t100\t205\tparent\t0\t+").unwrap();
+    writeln!(input, "chr1\t112\t210\tchild\t0\t+").unwrap();
+
+    let exe = env!("CARGO_BIN_EXE_trackclustertu");
+    let output = Command::new(exe)
+        .args([
+            "cluster",
+            "--in",
+            input_path.to_str().unwrap(),
+            "--format",
+            "bed6",
+            "--score1-threshold",
+            "0.95",
+            "--score2-threshold",
+            "0.60",
+            "--three-prime-tolerance-bp",
+            "0",
+            "--out-tu",
+            out_tu.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let tu_text = fs::read_to_string(&out_tu).unwrap();
+    assert_eq!(
+        tu_text,
+        concat!(
+            "chr1\t100\t205\tTU000001\t0\t+\n",
+            "chr1\t112\t210\tTU000002\t0\t+\n",
+        )
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn trackclustertu_cluster_help_hides_recount_only_and_fastq_options() {
     let exe = env!("CARGO_BIN_EXE_trackclustertu");
     let output = Command::new(exe)
@@ -191,6 +242,7 @@ fn trackclustertu_cluster_help_hides_recount_only_and_fastq_options() {
 
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("Cluster bacterial directRNA reads"));
+    assert!(help.contains("--three-prime-tolerance-bp"));
     assert!(!help.contains("--pooled-membership"));
     assert!(!help.contains("fastq"));
 }
