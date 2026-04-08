@@ -77,6 +77,13 @@ struct RunCli {
     #[arg(long, default_value_t = 12)]
     three_prime_tolerance_bp: u32,
 
+    /// Optional maximum strand-aware 5 prime delta allowed during second-pass attachment (bp).
+    ///
+    /// When set, pairs within this 5 prime cap and the 3 prime tolerance may still merge even
+    /// if score2 falls below the score2 threshold.
+    #[arg(long = "max-5p-delta")]
+    max_five_prime_delta_bp: Option<u32>,
+
     /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
     #[arg(long)]
     skip_score2_attachment: bool,
@@ -514,6 +521,11 @@ fn run_full_pipeline(cli: &RunCli) -> Result<()> {
         &mut cluster_args,
         "--three-prime-tolerance-bp",
         Some(cli.three_prime_tolerance_bp),
+    );
+    push_optional_arg(
+        &mut cluster_args,
+        "--max-5p-delta",
+        cli.max_five_prime_delta_bp,
     );
     if cli.skip_score2_attachment {
         cluster_args.push(OsString::from("--skip-score2-attachment"));

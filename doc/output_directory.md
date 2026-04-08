@@ -20,6 +20,7 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 
 By default, `trackclustertu cluster` forms score1 seed clusters and then runs a second-pass score2 merge that penalizes large short/long differences.
 That second pass allows a strand-aware 3 prime mismatch of up to `12 bp` by default, configurable with `--three-prime-tolerance-bp`.
+If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta`.
 If `--skip-score2-attachment` is used, the score1 seed clusters are kept as the final TUs.
 Clustering is span-based: when the input is BED12, only the outer transcript interval `[tx_start, tx_end)` participates in `score1` and `score2`.
 
@@ -84,7 +85,7 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 
 - `annotation.bed`: converted annotation BED when `--annotation-gff` is used
 
-`trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, and `--skip-score2-attachment`.
+`trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
 
 ## Formats / conventions
 
@@ -118,6 +119,7 @@ trackclustertu cluster \
   --score1-threshold 0.95 \
   --score2-threshold 0.6 \
   --three-prime-tolerance-bp 12 \
+  --max-5p-delta 50 \
   --annotation-bed gene.bed \
   --out-dir results
 ```

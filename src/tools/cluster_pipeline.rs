@@ -65,6 +65,13 @@ struct ClusterCli {
     #[arg(long, default_value_t = 12)]
     three_prime_tolerance_bp: u32,
 
+    /// Optional maximum strand-aware 5 prime delta allowed during second-pass attachment (bp).
+    ///
+    /// When set, pairs within this 5 prime cap and the 3 prime tolerance may still merge even
+    /// if score2 falls below the score2 threshold.
+    #[arg(long = "max-5p-delta")]
+    max_five_prime_delta_bp: Option<u32>,
+
     /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
     #[arg(long)]
     skip_score2_attachment: bool,
@@ -204,6 +211,7 @@ struct Cli {
     score1_threshold: f64,
     score2_threshold: f64,
     three_prime_tolerance_bp: u32,
+    max_five_prime_delta_bp: Option<u32>,
     skip_score2_attachment: bool,
     min_read_len: Option<u32>,
     out_tu: Option<PathBuf>,
@@ -235,6 +243,7 @@ impl From<ClusterCli> for Cli {
             score1_threshold: cli.score1_threshold,
             score2_threshold: cli.score2_threshold,
             three_prime_tolerance_bp: cli.three_prime_tolerance_bp,
+            max_five_prime_delta_bp: cli.max_five_prime_delta_bp,
             skip_score2_attachment: cli.skip_score2_attachment,
             min_read_len: cli.min_read_len,
             out_tu: cli.out_tu,
@@ -268,6 +277,7 @@ impl From<RecountCli> for Cli {
             score1_threshold: 0.95,
             score2_threshold: 0.6,
             three_prime_tolerance_bp: 12,
+            max_five_prime_delta_bp: None,
             skip_score2_attachment: false,
             min_read_len: None,
             out_tu: None,
@@ -1366,6 +1376,7 @@ fn run_cluster_mode(
     let clustering_options = TuClusteringOptions {
         attach_contained_reads: !cli.skip_score2_attachment,
         three_prime_tolerance_bp: cli.three_prime_tolerance_bp,
+        max_five_prime_delta_bp: cli.max_five_prime_delta_bp,
     };
     let (result, stats) = if cli.timings {
         let (result, stats) = crate::tu::cluster_tus_with_stats_options(

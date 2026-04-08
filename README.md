@@ -22,6 +22,7 @@ When the input is BED12, clustering intentionally uses only the outer transcript
 
 By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to merge only very similar seed clusters without treating strong short/long containment as a perfect match.
 That second pass allows a strand-aware 3 prime mismatch of up to `12 bp` by default; adjust it with `--three-prime-tolerance-bp`.
+If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta` to allow merges within an explicit strand-aware 5 prime delta.
 If you want to keep the score1 seed clusters as the final TUs, pass `--skip-score2-attachment`.
 
 ## Install
@@ -153,7 +154,7 @@ trackclustertu run \
   --out-dir results
 ```
 
-`trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, and `--skip-score2-attachment`.
+`trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
 
 This writes:
 
@@ -206,12 +207,14 @@ trackclustertu cluster \
   --score1-threshold 0.95 \
   --score2-threshold 0.6 \
   --three-prime-tolerance-bp 12 \
+  --max-5p-delta 50 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
 
 The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.6`.
 The default second-pass 3 prime allowance is `--three-prime-tolerance-bp 12`.
+`--max-5p-delta` is optional and disabled unless you set it.
 
 ```bash
 trackclustertu recount \

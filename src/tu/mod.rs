@@ -44,6 +44,7 @@ pub struct TuClusteringStats {
 pub struct TuClusteringOptions {
     pub attach_contained_reads: bool,
     pub three_prime_tolerance_bp: u32,
+    pub max_five_prime_delta_bp: Option<u32>,
 }
 
 impl Default for TuClusteringOptions {
@@ -51,6 +52,7 @@ impl Default for TuClusteringOptions {
         Self {
             attach_contained_reads: true,
             three_prime_tolerance_bp: 12,
+            max_five_prime_delta_bp: None,
         }
     }
 }
@@ -295,6 +297,21 @@ fn candidate_within_three_prime_tolerance(
     }
 }
 
+fn candidate_five_prime_delta(child: &ReadRecord, candidate: &ReadRecord) -> u32 {
+    match child.strand {
+        Strand::Plus | Strand::Unknown => child
+            .interval
+            .start
+            .get()
+            .saturating_sub(candidate.interval.start.get()),
+        Strand::Minus => candidate
+            .interval
+            .end
+            .get()
+            .saturating_sub(child.interval.end.get()),
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TuNoId {
     contig: String,
@@ -404,8 +421,14 @@ fn cluster_tus_region(
                     continue;
                 }
 
+                let five_prime_delta = candidate_five_prime_delta(child, candidate);
+                let five_prime_override = options
+                    .max_five_prime_delta_bp
+                    .map(|max_delta| five_prime_delta <= max_delta)
+                    .unwrap_or(false);
+
                 let s2 = score2_interval(child.interval, candidate.interval);
-                if s2 < score2_threshold {
+                if s2 < score2_threshold && !five_prime_override {
                     continue;
                 }
                 let s1 = score1_interval(child.interval, candidate.interval);
@@ -877,6 +900,92 @@ mod tests {
 
         let result = cluster_tus(&reads, 0.95, 0.60).unwrap();
         assert_eq!(result.tus.len(), 2);
+    }
+
+    #[test]
+    fn five_prime_delta_override_can_merge_plus_strand_near_matches() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 100, 205, "parent"),
+            read("chr1", Strand::Plus, 150, 210, "child"),
+        ];
+
+        let default_result = cluster_tus(&reads, 0.95, 0.60).unwrap();
+        assert_eq!(default_result.tus.len(), 2);
+
+        let relaxed_result = cluster_tus_with_options(
+            &reads,
+            0.95,
+            0.60,
+            TuClusteringOptions {
+                max_five_prime_delta_bp: Some(50),
+                ..TuClusteringOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(relaxed_result.tus.len(), 1);
+    }
+
+    #[test]
+    fn five_prime_delta_override_can_merge_minus_strand_near_matches() {
+        let reads = vec![
+            read("chr1", Strand::Minus, 100, 205, "parent"),
+            read("chr1", Strand::Minus, 105, 155, "child"),
+        ];
+
+        let default_result = cluster_tus(&reads, 0.95, 0.60).unwrap();
+        assert_eq!(default_result.tus.len(), 2);
+
+        let relaxed_result = cluster_tus_with_options(
+            &reads,
+            0.95,
+            0.60,
+            TuClusteringOptions {
+                max_five_prime_delta_bp: Some(50),
+                ..TuClusteringOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(relaxed_result.tus.len(), 1);
+    }
+
+    #[test]
+    fn five_prime_delta_override_respects_the_requested_cap() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 100, 205, "parent"),
+            read("chr1", Strand::Plus, 150, 210, "child"),
+        ];
+
+        let result = cluster_tus_with_options(
+            &reads,
+            0.95,
+            0.60,
+            TuClusteringOptions {
+                max_five_prime_delta_bp: Some(40),
+                ..TuClusteringOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.tus.len(), 2);
+    }
+
+    #[test]
+    fn five_prime_delta_override_does_not_block_normal_score2_merges() {
+        let reads = vec![
+            read("chr1", Strand::Plus, 100, 205, "parent"),
+            read("chr1", Strand::Plus, 120, 210, "child"),
+        ];
+
+        let result = cluster_tus_with_options(
+            &reads,
+            0.95,
+            0.60,
+            TuClusteringOptions {
+                max_five_prime_delta_bp: Some(10),
+                ..TuClusteringOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.tus.len(), 1);
     }
 
     #[test]
