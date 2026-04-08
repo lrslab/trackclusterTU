@@ -1,6 +1,6 @@
 tu_id	sample	count
 TU000001	sampleA	2
-TU000001	sampleB	1
-TU000002	sampleA	1
 TU000002	sampleB	1
+TU000003	sampleA	1
 TU000003	sampleB	1
+TU000004	sampleB	1

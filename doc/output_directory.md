@@ -5,7 +5,8 @@ This page describes the files written by:
 - `trackclustertu run` (full pipeline from FASTQ manifest to TU/gene outputs),
 - `trackclustertu map` (FASTQ -> minimap2 -> sorted BAM -> BED manifests),
 - `trackclustertu bam-to-bed` (BAM -> BED6), and
-- `trackclustertu cluster` / `trackclustertu recount` (TU clustering and recounting)
+- `trackclustertu cluster` / `trackclustertu recount` (TU clustering and recounting), and
+- `trackclustertu diagnose-missed-tus` / `trackclustertu rescue-missed-tus` (post-clustering missed-TU review and rescue)
 
 ## Common outputs (from `trackclustertu cluster`)
 
@@ -51,6 +52,48 @@ If `--annotation-bed` is provided, it can also write:
   - header: `gene_id` plus groups in first-seen manifest order
   - written only when the manifest has a non-empty `group` column
 
+## Missed-TU diagnostic outputs (from `trackclustertu diagnose-missed-tus`)
+
+This stage is meant to run after clustering. Pass the BED6 track that was clustered:
+
+- single-input workflow: the original BED6 file used with `trackclustertu cluster --in`
+- manifest workflow: the pooled BED6 file, usually `results/pooled.bed`
+
+It writes:
+
+- `--out-tsv`: TSV report of candidate boundary modes not represented by the current TU set
+- `--out-bed`: optional BED6 track for quick visualization in IGV or genome browsers
+
+The current default detector settings are:
+
+- `--three-prime-window-bp 12`
+- `--five-prime-window-bp 10`
+- `--min-family-support 20`
+- `--min-mode-support 20`
+- `--min-mode-fraction 0.02`
+
+## Missed-TU rescue outputs (from `trackclustertu rescue-missed-tus`)
+
+This stage uses the same clustered BED6 input plus the original TU BED and membership TSV. It writes rescued TU calls without modifying the original clustering outputs in place.
+
+It writes:
+
+- `--out-tu`: rescued TU BED6
+- `--out-membership`: rescued membership TSV
+- `--out-tu-count`: optional rescued TU counts CSV
+- `--out-candidates-tsv`: optional TSV report of rescued candidate modes
+- `--out-candidates-bed`: optional BED6 track of rescued candidate modes
+
+`trackclustertu rescue-missed-tus` uses the same default detector settings as `diagnose-missed-tus`:
+
+- `--three-prime-window-bp 12`
+- `--five-prime-window-bp 10`
+- `--min-family-support 20`
+- `--min-mode-support 20`
+- `--min-mode-fraction 0.02`
+
+If you need updated sample/group count matrices after rescue, rerun `trackclustertu recount` with the rescued membership TSV.
+
 ## Count-only outputs (from `trackclustertu recount`)
 
 `trackclustertu recount` requires both `--manifest` and `--pooled-membership`.
@@ -86,6 +129,7 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 - `annotation.bed`: converted annotation BED when `--annotation-gff` is used
 
 `trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
+It does not automatically run the missed-TU diagnose/rescue stages.
 
 ## Formats / conventions
 
@@ -117,12 +161,40 @@ trackclustertu cluster \
   --manifest samples.bed.tsv \
   --format bed6 \
   --score1-threshold 0.95 \
-  --score2-threshold 0.6 \
+  --score2-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
   --max-5p-delta 50 \
   --annotation-bed gene.bed \
   --out-dir results
 ```
+
+## Recommended default rescue pass
+
+After clustering, the default post-clustering review/rescue flow is:
+
+```bash
+trackclustertu diagnose-missed-tus \
+  --in results/pooled.bed \
+  --existing-tu results/tus.bed \
+  --annotation-bed gene.bed \
+  --out-tsv rescue/missed_candidates.tsv \
+  --out-bed rescue/missed_candidates.bed
+```
+
+```bash
+trackclustertu rescue-missed-tus \
+  --in results/pooled.bed \
+  --existing-tu results/tus.bed \
+  --existing-membership results/membership.tsv \
+  --annotation-bed gene.bed \
+  --out-tu rescue/rescued.tus.bed \
+  --out-membership rescue/rescued.membership.tsv \
+  --out-tu-count rescue/rescued.tu_count.csv \
+  --out-candidates-tsv rescue/rescued_candidates.tsv \
+  --out-candidates-bed rescue/rescued_candidates.bed
+```
+
+If you started from a single BED input instead of a manifest, replace `results/pooled.bed` with the original BED6 reads file that you clustered.
 
 ## Multi-sample pooled clustering
 

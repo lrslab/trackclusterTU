@@ -9,10 +9,13 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ### Added
 
 - Added `--max-5p-delta` to `trackclustertu cluster` and `trackclustertu run` to optionally relax strand-aware 5 prime fragmentation during second-pass TU attachment.
+- Added `trackclustertu diagnose-missed-tus` to report high-support boundary modes that are not represented by the current TU calls.
+- Added `trackclustertu rescue-missed-tus` to promote supported missed-TU boundary modes into rescued TU and membership outputs without overwriting the original clustering results.
 
 ### Changed
 
-- Updated second-pass TU attachment docs and regression tests for the new 3 prime tolerance and optional 5 prime override behavior.
+- Updated the default clustering `score2` threshold to `0.80`.
+- Updated second-pass TU attachment docs, examples, and regression tests for the new 3 prime tolerance, optional 5 prime override, and post-clustering diagnose/rescue workflow.
 - Removed release-noise files that should not be kept in the GitHub tree or release package.
 
 ## [0.1.1] - 2026-03-24

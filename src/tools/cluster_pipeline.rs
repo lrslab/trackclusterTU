@@ -58,7 +58,7 @@ struct ClusterCli {
     score1_threshold: f64,
 
     /// score2 threshold (overlap / max_len).
-    #[arg(long, default_value_t = 0.6)]
+    #[arg(long, default_value_t = 0.80)]
     score2_threshold: f64,
 
     /// Allowed strand-aware 3 prime mismatch during second-pass score2 attachment (bp).
@@ -275,7 +275,7 @@ impl From<RecountCli> for Cli {
             format: InputFormat::Auto,
             out_dir: cli.out_dir,
             score1_threshold: 0.95,
-            score2_threshold: 0.6,
+            score2_threshold: 0.80,
             three_prime_tolerance_bp: 12,
             max_five_prime_delta_bp: None,
             skip_score2_attachment: false,

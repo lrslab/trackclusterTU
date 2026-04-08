@@ -119,8 +119,9 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         fs::read_to_string(&out_tu).unwrap(),
         concat!(
             "chr1\t100\t200\tTU000001\t0\t+\n",
-            "chr1\t300\t400\tTU000002\t0\t+\n",
-            "chr1\t500\t600\tTU000003\t0\t+\n",
+            "chr1\t120\t180\tTU000002\t0\t+\n",
+            "chr1\t300\t400\tTU000003\t0\t+\n",
+            "chr1\t500\t600\tTU000004\t0\t+\n",
         )
     );
 
@@ -129,10 +130,10 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         concat!(
             "sampleA::r1\tTU000001\t1.000000\t1.000000\n",
             "sampleA::r2\tTU000001\t0.980198\t0.990000\n",
-            "sampleB::r1\tTU000001\t0.600000\t0.600000\n",
-            "sampleA::r3\tTU000002\t1.000000\t1.000000\n",
-            "sampleB::r2\tTU000002\t1.000000\t1.000000\n",
-            "sampleB::r3\tTU000003\t1.000000\t1.000000\n",
+            "sampleB::r1\tTU000002\t1.000000\t1.000000\n",
+            "sampleA::r3\tTU000003\t1.000000\t1.000000\n",
+            "sampleB::r2\tTU000003\t1.000000\t1.000000\n",
+            "sampleB::r3\tTU000004\t1.000000\t1.000000\n",
         )
     );
 
@@ -152,9 +153,10 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         fs::read_to_string(&out_tu_count).unwrap(),
         concat!(
             "tu_id,count\n",
-            "TU000001,3\n",
-            "TU000002,2\n",
-            "TU000003,1\n",
+            "TU000001,2\n",
+            "TU000002,1\n",
+            "TU000003,2\n",
+            "TU000004,1\n",
         )
     );
 
@@ -163,10 +165,10 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         concat!(
             "tu_id\tsample\tcount\n",
             "TU000001\tsampleA\t2\n",
-            "TU000001\tsampleB\t1\n",
-            "TU000002\tsampleA\t1\n",
             "TU000002\tsampleB\t1\n",
+            "TU000003\tsampleA\t1\n",
             "TU000003\tsampleB\t1\n",
+            "TU000004\tsampleB\t1\n",
         )
     );
 
@@ -174,9 +176,10 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         fs::read_to_string(&out_sample_matrix).unwrap(),
         concat!(
             "tu_id\tsampleA\tsampleB\n",
-            "TU000001\t2\t1\n",
-            "TU000002\t1\t1\n",
-            "TU000003\t0\t1\n",
+            "TU000001\t2\t0\n",
+            "TU000002\t0\t1\n",
+            "TU000003\t1\t1\n",
+            "TU000004\t0\t1\n",
         )
     );
 
@@ -184,9 +187,10 @@ fn trackclustertu_clusters_manifest_and_writes_sample_tables() {
         fs::read_to_string(&out_group_matrix).unwrap(),
         concat!(
             "tu_id\tcontrol\ttreated\n",
-            "TU000001\t2\t1\n",
-            "TU000002\t1\t1\n",
-            "TU000003\t0\t1\n",
+            "TU000001\t2\t0\n",
+            "TU000002\t0\t1\n",
+            "TU000003\t1\t1\n",
+            "TU000004\t0\t1\n",
         )
     );
 
@@ -314,27 +318,30 @@ fn trackclustertu_recounts_multi_sample_tables_from_pooled_membership() {
         fs::read_to_string(&out_tu_count).unwrap(),
         concat!(
             "tu_id,count\n",
-            "TU000001,3\n",
-            "TU000002,2\n",
-            "TU000003,1\n",
+            "TU000001,2\n",
+            "TU000002,1\n",
+            "TU000003,2\n",
+            "TU000004,1\n",
         )
     );
     assert_eq!(
         fs::read_to_string(&out_sample_matrix).unwrap(),
         concat!(
             "tu_id\tsampleA\tsampleB\n",
-            "TU000001\t2\t1\n",
-            "TU000002\t1\t1\n",
-            "TU000003\t0\t1\n",
+            "TU000001\t2\t0\n",
+            "TU000002\t0\t1\n",
+            "TU000003\t1\t1\n",
+            "TU000004\t0\t1\n",
         )
     );
     assert_eq!(
         fs::read_to_string(&out_group_matrix).unwrap(),
         concat!(
             "tu_id\tcontrol\ttreated\n",
-            "TU000001\t2\t1\n",
-            "TU000002\t1\t1\n",
-            "TU000003\t0\t1\n",
+            "TU000001\t2\t0\n",
+            "TU000002\t0\t1\n",
+            "TU000003\t1\t1\n",
+            "TU000004\t0\t1\n",
         )
     );
 

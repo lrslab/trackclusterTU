@@ -78,6 +78,8 @@ trackclustertu run --help
 trackclustertu map --help
 trackclustertu cluster --help
 trackclustertu recount --help
+trackclustertu diagnose-missed-tus --help
+trackclustertu rescue-missed-tus --help
 trackclustertu bam-to-bed --help
 trackclustertu gff-to-bed --help
 ```
@@ -123,6 +125,83 @@ trackclustertu bam-to-bed \
   --out-bed sample.bed
 ```
 
+```bash
+trackclustertu diagnose-missed-tus \
+  --in sample.bed \
+  --existing-tu results/tus.bed \
+  --annotation-bed genes.bed \
+  --out-tsv results/missed_tus.tsv \
+  --out-bed results/missed_tus.bed
+```
+
+`diagnose-missed-tus` groups reads into strand-aware 3 prime end families, finds high-support 5 prime modes within each family, and reports candidate intervals that are not represented by the current TU BED.
+
+```bash
+trackclustertu rescue-missed-tus \
+  --in sample.bed \
+  --existing-tu results/tus.bed \
+  --existing-membership results/membership.tsv \
+  --annotation-bed genes.bed \
+  --out-tu rescue/rescued.tus.bed \
+  --out-membership rescue/rescued.membership.tsv \
+  --out-tu-count rescue/rescued.tu_count.csv \
+  --out-candidates-tsv rescue/rescued_candidates.tsv
+```
+
+`rescue-missed-tus` uses the same boundary-mode detector to add rescued TU intervals for abundant unsupported end modes and rewrites membership assignments only for reads that match a rescued mode better than their current TU.
+
+## Recommended Default Workflow: Cluster Then Rescue
+
+`trackclustertu run` stops after the main clustering and count outputs. The missed-TU rescue stage is a separate post-clustering pass.
+
+The current built-in defaults in code are:
+
+- clustering: `--score1-threshold 0.95`, `--score2-threshold 0.80`, `--three-prime-tolerance-bp 12`
+- diagnose/rescue: `--three-prime-window-bp 12`, `--five-prime-window-bp 10`, `--min-family-support 20`, `--min-mode-support 20`, `--min-mode-fraction 0.02`
+
+For a single BED6 input, the recommended default walkthrough is:
+
+```bash
+trackclustertu cluster \
+  --in reads.bed \
+  --format bed6 \
+  --annotation-bed genes.bed \
+  --out-dir results
+```
+
+```bash
+trackclustertu diagnose-missed-tus \
+  --in reads.bed \
+  --existing-tu results/tus.bed \
+  --annotation-bed genes.bed \
+  --out-tsv rescue/missed_candidates.tsv \
+  --out-bed rescue/missed_candidates.bed
+```
+
+```bash
+trackclustertu rescue-missed-tus \
+  --in reads.bed \
+  --existing-tu results/tus.bed \
+  --existing-membership results/membership.tsv \
+  --annotation-bed genes.bed \
+  --out-tu rescue/rescued.tus.bed \
+  --out-membership rescue/rescued.membership.tsv \
+  --out-tu-count rescue/rescued.tu_count.csv \
+  --out-candidates-tsv rescue/rescued_candidates.tsv \
+  --out-candidates-bed rescue/rescued_candidates.bed
+```
+
+For manifest-based clustering, use `results/pooled.bed` as the `--in` file for `diagnose-missed-tus` and `rescue-missed-tus`, because that is the BED6 track that was actually clustered.
+
+If you need updated sample/group count tables after rescue, rerun `recount` from the rescued membership TSV:
+
+```bash
+trackclustertu recount \
+  --manifest mapped/samples.bed.tsv \
+  --pooled-membership rescue/rescued.membership.tsv \
+  --out-dir rescue/recount
+```
+
 ## Full Pipeline
 
 Supported workflow:
@@ -155,6 +234,7 @@ trackclustertu run \
 ```
 
 `trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
+It does not automatically run `diagnose-missed-tus` or `rescue-missed-tus`.
 
 This writes:
 
@@ -205,14 +285,14 @@ trackclustertu cluster \
   --manifest mapped/samples.bed.tsv \
   --format bed6 \
   --score1-threshold 0.95 \
-  --score2-threshold 0.6 \
+  --score2-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
   --max-5p-delta 50 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
 
-The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.6`.
+The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.80`.
 The default second-pass 3 prime allowance is `--three-prime-tolerance-bp 12`.
 `--max-5p-delta` is optional and disabled unless you set it.
 
@@ -222,6 +302,32 @@ trackclustertu recount \
   --pooled-membership results/membership.tsv \
   --out-dir recount_results
 ```
+
+If you want the default rescue pass after clustering, use:
+
+```bash
+trackclustertu diagnose-missed-tus \
+  --in results/pooled.bed \
+  --existing-tu results/tus.bed \
+  --annotation-bed genes.bed \
+  --out-tsv rescue/missed_candidates.tsv \
+  --out-bed rescue/missed_candidates.bed
+```
+
+```bash
+trackclustertu rescue-missed-tus \
+  --in results/pooled.bed \
+  --existing-tu results/tus.bed \
+  --existing-membership results/membership.tsv \
+  --annotation-bed genes.bed \
+  --out-tu rescue/rescued.tus.bed \
+  --out-membership rescue/rescued.membership.tsv \
+  --out-tu-count rescue/rescued.tu_count.csv \
+  --out-candidates-tsv rescue/rescued_candidates.tsv \
+  --out-candidates-bed rescue/rescued_candidates.bed
+```
+
+For updated sample/group matrices after rescue, recount from `rescue/rescued.membership.tsv`.
 
 ## Main Outputs
 

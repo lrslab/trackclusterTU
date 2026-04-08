@@ -21,6 +21,8 @@ Commands:
   bam-to-bed  BAM input(s) to BED6
   cluster     BED input(s) to TU/gene outputs
   recount     Membership TSV to count tables
+  diagnose-missed-tus  Report high-support boundary modes missing from current TU calls
+  rescue-missed-tus    Promote high-support boundary modes into rescued TU calls
   gff-to-bed  GFF3 gene annotations to BED6
 
 Use `trackclustertu <command> --help` for command-specific flags.
@@ -70,7 +72,7 @@ struct RunCli {
     score1_threshold: f64,
 
     /// score2 threshold (overlap / max_len).
-    #[arg(long, default_value_t = 0.6)]
+    #[arg(long, default_value_t = 0.80)]
     score2_threshold: f64,
 
     /// Allowed strand-aware 3 prime mismatch during second-pass score2 attachment (bp).
@@ -578,6 +580,12 @@ pub fn entrypoint() -> Result<()> {
             "trackclustertu recount",
             args,
         )),
+        Some("diagnose-missed-tus") => crate::tools::diagnose_missed_tus::run_from_args(
+            prepend_program("trackclustertu diagnose-missed-tus", args),
+        ),
+        Some("rescue-missed-tus") => crate::tools::diagnose_missed_tus::run_rescue_from_args(
+            prepend_program("trackclustertu rescue-missed-tus", args),
+        ),
         Some("gff-to-bed") => {
             run_gff_to_bed_from_args(prepend_program("trackclustertu gff-to-bed", args))
         }
