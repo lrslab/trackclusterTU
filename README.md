@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="doc/logo.svg" alt="trackclusterTU logo" width="220">
+</p>
+
 # trackclusterTU
 
 Fast interval similarity and scalable clustering for bacterial transcript units (TUs) from mapped long reads.

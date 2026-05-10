@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">trackclusterTU logo</title>
+  <desc id="desc">A hexagonal logo with genomic read intervals clustering into transcript units.</desc>
+  <defs>
+    <linearGradient id="hexFill" x1="96" y1="80" x2="416" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#083344"/>
+      <stop offset="0.54" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#f97316"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.28"/>
+    </filter>
+    <clipPath id="hexClip">
+      <polygon points="256,34 448,145 448,367 256,478 64,367 64,145"/>
+    </clipPath>
+  </defs>
+
+  <polygon points="256,18 462,137 462,375 256,494 50,375 50,137" fill="#ffffff"/>
+  <polygon points="256,34 448,145 448,367 256,478 64,367 64,145" fill="url(#hexFill)" filter="url(#shadow)"/>
+
+  <g clip-path="url(#hexClip)">
+    <path d="M84 392c65-35 111-52 181-52 71 0 118 17 181 52v86H84z" fill="#022c22" opacity="0.22"/>
+    <path d="M88 135c60 22 111 32 168 32s108-10 168-32" fill="none" stroke="#5eead4" stroke-width="18" opacity="0.16"/>
+    <path d="M92 118c54 18 106 26 164 26s110-8 164-26" fill="none" stroke="#fed7aa" stroke-width="10" opacity="0.22"/>
+  </g>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 176h288" stroke="#ccfbf1" stroke-width="8" opacity="0.74"/>
+    <path d="M131 160v32M192 160v32M256 160v32M320 160v32M381 160v32" stroke="#ccfbf1" stroke-width="5" opacity="0.55"/>
+  </g>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M126 216h180M136 238h180M146 260h160" stroke="#a7f3d0" stroke-width="6"/>
+    <path d="M246 236h120M256 258h120M246 280h130" stroke="#fed7aa" stroke-width="6"/>
+  </g>
+
+  <g>
+    <circle cx="408" cy="238" r="29" fill="#0f172a" opacity="0.2"/>
+    <circle cx="408" cy="238" r="23" fill="#134e4a" opacity="0.86" stroke="#f8fafc" stroke-width="4"/>
+    <circle cx="397" cy="232" r="5" fill="#fed7aa"/>
+    <circle cx="419" cy="232" r="5" fill="#fed7aa"/>
+    <circle cx="408" cy="250" r="5" fill="#fed7aa"/>
+    <path d="M402 234l12 0M405 246l-6-10M411 246l6-10" fill="none" stroke="#fed7aa" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M126 310h190M246 334h130" stroke="#f8fafc" stroke-width="8" opacity="0.88"/>
+    <path d="M126 310h190" stroke="#5eead4" stroke-width="15"/>
+    <path d="M246 334h130" stroke="#fdba74" stroke-width="15"/>
+    <path d="M126 297v26M316 297v26M246 321v26M376 321v26" stroke="#f8fafc" stroke-width="5" opacity="0.78"/>
+  </g>
+
+  <text x="256" y="380" text-anchor="middle" font-family="Inter, Avenir, Helvetica, Arial, sans-serif" font-size="40" font-weight="800" fill="#ffffff" letter-spacing="0">trackcluster</text>
+  <text x="256" y="420" text-anchor="middle" font-family="Inter, Avenir, Helvetica, Arial, sans-serif" font-size="42" font-weight="900" fill="#fed7aa" letter-spacing="0">TU</text>
+</svg>
