@@ -288,15 +288,14 @@ pub fn parse_manifest(path: &Path) -> Result<Vec<SampleManifestRecord>, MultiSam
                     "sample" => sample_col = Some(idx),
                     "reads" => reads_col = Some(idx),
                     "group" => group_col = Some(idx),
-                    "evidence" | "evidence_tsv" => {
-                        if evidence_col.replace(idx).is_some() {
-                            return Err(MultiSampleError::DuplicateColumn {
-                                path: path.clone(),
-                                line: line_number,
-                                column: "evidence/evidence_tsv".to_owned(),
-                            });
-                        }
+                    "evidence" | "evidence_tsv" if evidence_col.is_some() => {
+                        return Err(MultiSampleError::DuplicateColumn {
+                            path: path.clone(),
+                            line: line_number,
+                            column: "evidence/evidence_tsv".to_owned(),
+                        });
                     }
+                    "evidence" | "evidence_tsv" => evidence_col = Some(idx),
                     _ => {}
                 }
             }

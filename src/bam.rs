@@ -312,20 +312,15 @@ type BamResult<T> = std::result::Result<T, BamConversionError>;
 /// [`FromStr`] accepts the displayed kebab-case names plus underscore and short
 /// compatibility spellings (`drna`, `dcdna`, and `pcrcdna`). [`fmt::Display`]
 /// always emits the canonical kebab-case name.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum LibraryProfile {
     /// Oxford Nanopore direct-RNA sequencing.
+    #[default]
     DirectRna,
     /// Oxford Nanopore direct-cDNA sequencing.
     DirectCdna,
     /// PCR-amplified cDNA sequencing.
     PcrCdna,
-}
-
-impl Default for LibraryProfile {
-    fn default() -> Self {
-        Self::DirectRna
-    }
 }
 
 impl LibraryProfile {

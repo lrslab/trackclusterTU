@@ -50,29 +50,20 @@ pub fn cluster_by_span(
             .or_default();
 
         match clusters.last_mut() {
-            None => {
+            Some(cluster) if tx_span.start() < cluster.span.end() => {
+                if tx_span.end() > cluster.span.end() {
+                    cluster.span = Interval::new(cluster.span.start(), tx_span.end())
+                        .expect("cluster extension retains ordered bounds");
+                }
+                cluster.members.push(index);
+            }
+            _ => {
                 clusters.push(RangeCluster {
                     chrom: transcript.chrom().to_owned(),
                     strand: key_strand,
                     span: tx_span,
                     members: vec![index],
                 });
-            }
-            Some(cluster) => {
-                if tx_span.start() < cluster.span.end() {
-                    if tx_span.end() > cluster.span.end() {
-                        cluster.span = Interval::new(cluster.span.start(), tx_span.end())
-                            .expect("cluster extension retains ordered bounds");
-                    }
-                    cluster.members.push(index);
-                } else {
-                    clusters.push(RangeCluster {
-                        chrom: transcript.chrom().to_owned(),
-                        strand: key_strand,
-                        span: tx_span,
-                        members: vec![index],
-                    });
-                }
             }
         }
     }

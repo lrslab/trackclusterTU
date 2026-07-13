@@ -96,6 +96,13 @@ changes before adopting these outputs.
   the release provides one optional `SHA256SUMS` manifest. Crates.io
   publication remains disabled.
 
+### Fixed
+
+- Restored the strict GitHub release gate on Rust 1.97 by updating source that
+  triggered newly enabled Clippy lints, without changing CLI behavior.
+- Pinned tagged release gates and binary builds to Rust 1.97.0 so rerunning the
+  release uses the same compiler and lint set.
+
 ### Security
 
 - Updated `anyhow`, `crossbeam-epoch`, and development `rand` to resolve the
