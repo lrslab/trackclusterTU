@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use trackcluster_rs::model::{Coord, Interval, Strand};
-use trackcluster_rs::tu::{cluster_tus, ReadRecord};
+use trackclustertu::model::{Coord, Interval, Strand};
+use trackclustertu::tu::{cluster_tus, ReadRecord};
 
 fn interval(start: u32, end: u32) -> Interval {
     Interval::new(Coord::new(start), Coord::new(end)).unwrap()
@@ -57,7 +57,7 @@ fn bench_cluster_tus(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let result = cluster_tus(black_box(&reads), 0.95, 0.99).unwrap();
-                    black_box(result.tus.len())
+                    black_box(result.tus().len())
                 })
             },
         );

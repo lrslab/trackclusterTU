@@ -5,6 +5,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod support;
+use support::count_v1_projection;
+
 use noodles::sam::alignment::io::Write as _;
 use noodles::{
     bam,
@@ -203,6 +206,9 @@ esac
             annotation_gff.to_str().unwrap(),
             "--out-dir",
             out_dir.to_str().unwrap(),
+            "--ambiguity-margin",
+            "0.05",
+            "--fractional-assignment",
         ])
         .output()
         .unwrap();
@@ -233,17 +239,32 @@ esac
     assert_eq!(
         fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
         concat!(
-            "chr1\t100\t200\tTU000001\t0\t+\n",
-            "chr1\t300\t400\tTU000002\t0\t+\n",
+            "chr1\t100\t200\tTUg_63687231_100_200_p\t0\t+\n",
+            "chr1\t300\t400\tTUg_63687231_300_400_p\t0\t+\n",
         )
     );
     assert_eq!(
-        fs::read_to_string(out_dir.join("tu_count.csv")).unwrap(),
-        concat!("tu_id,count\n", "TU000001,2\n", "TU000002,1\n",)
+        count_v1_projection(&fs::read_to_string(out_dir.join("tu_count.csv")).unwrap()),
+        concat!(
+            "tu_id,count\n",
+            "TUg_63687231_100_200_p,2\n",
+            "TUg_63687231_300_400_p,1\n",
+        )
     );
     assert_eq!(
-        fs::read_to_string(out_dir.join("gene_count.csv")).unwrap(),
+        count_v1_projection(&fs::read_to_string(out_dir.join("gene_count.csv")).unwrap()),
         concat!("gene_id,count\n", "geneA,2\n", "geneB,2\n", "geneC,1\n",)
+    );
+    let run_manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("run_manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        run_manifest["effective_configuration"]["clustering"]["ambiguity_margin"],
+        0.05
+    );
+    assert_eq!(
+        run_manifest["effective_configuration"]["clustering"]["fractional_assignment"],
+        true
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -373,14 +394,25 @@ esac
     assert_eq!(
         fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
         concat!(
-            "chr1\t100\t200\tTU000001\t0\t+\n",
-            "chr1\t120\t180\tTU000002\t0\t+\n",
+            "chr1\t100\t200\tTUg_63687231_100_200_p\t0\t+\n",
+            "chr1\t120\t180\tTUg_63687231_120_180_p\t0\t+\n",
         )
     );
     assert_eq!(
-        fs::read_to_string(out_dir.join("tu_count.csv")).unwrap(),
-        concat!("tu_id,count\n", "TU000001,1\n", "TU000002,1\n",)
+        count_v1_projection(&fs::read_to_string(out_dir.join("tu_count.csv")).unwrap()),
+        concat!(
+            "tu_id,count\n",
+            "TUg_63687231_100_200_p,1\n",
+            "TUg_63687231_120_180_p,1\n",
+        )
     );
+
+    let run_manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("run_manifest.json")).unwrap())
+            .unwrap();
+    let clustering = &run_manifest["effective_configuration"]["clustering"];
+    assert_eq!(clustering["skip_overlap_over_longer_attachment"], true);
+    assert!(clustering.get("skip_score2_attachment").is_none());
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -510,13 +542,17 @@ esac
     assert_eq!(
         fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
         concat!(
-            "chr1\t100\t205\tTU000001\t0\t+\n",
-            "chr1\t112\t210\tTU000002\t0\t+\n",
+            "chr1\t100\t205\tTUg_63687231_100_205_p\t0\t+\n",
+            "chr1\t112\t210\tTUg_63687231_112_210_p\t0\t+\n",
         )
     );
     assert_eq!(
-        fs::read_to_string(out_dir.join("tu_count.csv")).unwrap(),
-        concat!("tu_id,count\n", "TU000001,1\n", "TU000002,1\n",)
+        count_v1_projection(&fs::read_to_string(out_dir.join("tu_count.csv")).unwrap()),
+        concat!(
+            "tu_id,count\n",
+            "TUg_63687231_100_205_p,1\n",
+            "TUg_63687231_112_210_p,1\n",
+        )
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -646,11 +682,11 @@ esac
 
     assert_eq!(
         fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
-        "chr1\t100\t205\tTU000001\t0\t+\n"
+        "chr1\t100\t205\tTUg_63687231_100_205_p\t0\t+\n"
     );
     assert_eq!(
-        fs::read_to_string(out_dir.join("tu_count.csv")).unwrap(),
-        concat!("tu_id,count\n", "TU000001,2\n",)
+        count_v1_projection(&fs::read_to_string(out_dir.join("tu_count.csv")).unwrap()),
+        concat!("tu_id,count\n", "TUg_63687231_100_205_p,2\n",)
     );
 
     let _ = fs::remove_dir_all(&tmp);

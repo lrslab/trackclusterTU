@@ -1,18 +1,44 @@
+//! Length and merge operations for sorted half-open interval lists.
+
 use crate::model::Interval;
 
 fn sorted_non_overlapping(xs: &[Interval]) -> bool {
     xs.windows(2).all(|window| {
         let left = window[0];
         let right = window[1];
-        left.start <= right.start && left.end <= right.start
+        left.start() <= right.start() && left.end() <= right.start()
     })
 }
 
+/// Sum the lengths of sorted, non-overlapping intervals.
+///
+/// The caller must supply intervals ordered by start coordinate with no shared
+/// bases. Debug builds assert this precondition.
 pub fn total_len(xs: &[Interval]) -> u64 {
     debug_assert!(sorted_non_overlapping(xs));
     xs.iter().map(|interval| interval.len() as u64).sum()
 }
 
+/// Compute the total intersection length of two sorted, non-overlapping lists.
+///
+/// The caller must supply both lists ordered by start coordinate with no
+/// internal overlaps. Debug builds assert this precondition. Merely touching
+/// half-open intervals contribute zero bases.
+///
+/// # Examples
+///
+/// ```
+/// use trackclustertu::interval::{intersection_len, merge_overlaps, union_len};
+/// use trackclustertu::model::{Coord, Interval};
+///
+/// let interval = |start, end| Interval::new(Coord::new(start), Coord::new(end));
+/// let left = merge_overlaps(vec![interval(0, 10)?, interval(8, 15)?]);
+/// let right = vec![interval(12, 20)?];
+///
+/// assert_eq!(intersection_len(&left, &right), 3);
+/// assert_eq!(union_len(&left, &right), 20);
+/// # Ok::<(), trackclustertu::model::IntervalError>(())
+/// ```
 pub fn intersection_len(a: &[Interval], b: &[Interval]) -> u64 {
     debug_assert!(sorted_non_overlapping(a));
     debug_assert!(sorted_non_overlapping(b));
@@ -25,18 +51,18 @@ pub fn intersection_len(a: &[Interval], b: &[Interval]) -> u64 {
         let a_interval = a[ai];
         let b_interval = b[bi];
 
-        if a_interval.end <= b_interval.start {
+        if a_interval.end() <= b_interval.start() {
             ai += 1;
             continue;
         }
-        if b_interval.end <= a_interval.start {
+        if b_interval.end() <= a_interval.start() {
             bi += 1;
             continue;
         }
 
         total += a_interval.overlap_len(b_interval) as u64;
 
-        if a_interval.end <= b_interval.end {
+        if a_interval.end() <= b_interval.end() {
             ai += 1;
         } else {
             bi += 1;
@@ -46,18 +72,29 @@ pub fn intersection_len(a: &[Interval], b: &[Interval]) -> u64 {
     total
 }
 
+/// Compute the union length of two sorted, non-overlapping lists.
+///
+/// The same ordering and non-overlap preconditions as [`intersection_len`]
+/// apply to both inputs.
 pub fn union_len(a: &[Interval], b: &[Interval]) -> u64 {
     total_len(a) + total_len(b) - intersection_len(a, b)
 }
 
+/// Sort intervals and merge strict overlaps, retaining merely touching intervals.
+///
+/// The returned intervals are ordered by `(start, end)` and do not share bases,
+/// making them suitable for [`total_len`], [`intersection_len`], and
+/// [`union_len`]. Empty intervals are retained unless absorbed by a strict
+/// overlap.
 pub fn merge_overlaps(mut xs: Vec<Interval>) -> Vec<Interval> {
-    xs.sort_unstable_by_key(|interval| (interval.start, interval.end));
+    xs.sort_unstable_by_key(|interval| (interval.start(), interval.end()));
     let mut merged: Vec<Interval> = Vec::new();
     for interval in xs {
         match merged.last_mut() {
-            Some(last) if interval.start < last.end => {
-                if interval.end > last.end {
-                    last.end = interval.end;
+            Some(last) if interval.start() < last.end() => {
+                if interval.end() > last.end() {
+                    *last = Interval::new(last.start(), interval.end())
+                        .expect("merged interval retains ordered bounds");
                 }
             }
             _ => merged.push(interval),
@@ -79,8 +116,8 @@ mod tests {
     fn coverage(xs: &[Interval], max: usize) -> Vec<bool> {
         let mut cov = vec![false; max];
         for interval in xs {
-            let start = interval.start.get() as usize;
-            let end = interval.end.get() as usize;
+            let start = interval.start().get() as usize;
+            let end = interval.end().get() as usize;
             let start = start.min(max);
             let end = end.min(max);
             cov[start..end].fill(true);

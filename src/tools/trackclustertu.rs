@@ -1,12 +1,21 @@
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use serde_json::{json, Value};
 
+use crate::io::delimited::{DelimitedWriter, Delimiter};
+use crate::tools::cluster_pipeline::{
+    AnnotationRequest, ClusterConfig, ClusterInput, ClusterOptions, ClusterOutputPaths,
+    ClusterRequest, InputFormat, TuIdStyle,
+};
+use crate::tools::output_transaction::OutputTransaction;
+use crate::tools::run_manifest::{
+    Executable, InputDescriptor, ManifestOsValue, RunManifest, RunManifestPublisher,
+};
 use crate::tu::multi::{parse_manifest, SampleManifestRecord};
 
 const TOP_LEVEL_HELP: &str = "\
@@ -18,7 +27,7 @@ Usage:
 Commands:
   run         Full pipeline from FASTQ manifest to TU/gene counts
   map         FASTQ manifest to sorted BAMs plus BED manifest
-  bam-to-bed  BAM input(s) to BED6
+  bam-to-bed  BAM input(s) to BED6 plus optional evidence sidecars
   cluster     BED input(s) to TU/gene outputs
   recount     Membership TSV to count tables
   diagnose-missed-tus  Report high-support boundary modes missing from current TU calls
@@ -63,31 +72,67 @@ struct RunCli {
     #[arg(long, default_value_t = 0)]
     min_mapq: u8,
 
-    /// Additional minimap2 arguments provided as one whitespace-separated string.
-    #[arg(long, default_value = "-ax map-ont")]
-    minimap2_args: String,
+    /// One additional minimap2 argument. Repeat this flag to preserve argument boundaries.
+    #[arg(
+        long = "minimap2-arg",
+        action = clap::ArgAction::Append,
+        allow_hyphen_values = true,
+        conflicts_with = "minimap2_args_compat"
+    )]
+    minimap2_arg: Vec<OsString>,
 
-    /// score1 threshold (overlap / union).
-    #[arg(long, default_value_t = 0.95)]
+    /// Deprecated: whitespace-separated minimap2 arguments.
+    ///
+    /// Use repeated --minimap2-arg values instead. This compatibility option cannot represent
+    /// an individual argument containing whitespace and conflicts with --minimap2-arg.
+    #[arg(
+        long = "minimap2-args",
+        value_name = "ARGS",
+        allow_hyphen_values = true,
+        conflicts_with = "minimap2_arg"
+    )]
+    minimap2_args_compat: Option<String>,
+
+    /// minimap2 executable name or explicit path.
+    #[arg(long, default_value = "minimap2")]
+    minimap2: PathBuf,
+
+    /// samtools executable name or explicit path.
+    #[arg(long, default_value = "samtools")]
+    samtools: PathBuf,
+
+    /// Span-Jaccard threshold (overlap / union).
+    #[arg(
+        long = "span-jaccard-threshold",
+        visible_alias = "score1-threshold",
+        default_value_t = 0.95
+    )]
     score1_threshold: f64,
 
-    /// score2 threshold (overlap / max_len).
-    #[arg(long, default_value_t = 0.80)]
+    /// Overlap-over-longer threshold (overlap / max_len).
+    #[arg(
+        long = "overlap-over-longer-threshold",
+        visible_alias = "score2-threshold",
+        default_value_t = 0.80
+    )]
     score2_threshold: f64,
 
-    /// Allowed strand-aware 3 prime mismatch during second-pass score2 attachment (bp).
+    /// Allowed strand-aware 3 prime mismatch during overlap-over-longer attachment (bp).
     #[arg(long, default_value_t = 12)]
     three_prime_tolerance_bp: u32,
 
-    /// Optional maximum strand-aware 5 prime delta allowed during second-pass attachment (bp).
+    /// Optional maximum strand-aware 5 prime delta allowed during the attachment pass (bp).
     ///
     /// When set, pairs within this 5 prime cap and the 3 prime tolerance may still merge even
-    /// if score2 falls below the score2 threshold.
+    /// if overlap over longer falls below its threshold.
     #[arg(long = "max-5p-delta")]
     max_five_prime_delta_bp: Option<u32>,
 
-    /// Skip the second-pass score2 merge and keep score1 seed clusters as final TUs.
-    #[arg(long)]
+    /// Skip overlap-over-longer attachment and keep span-Jaccard seed clusters as final TUs.
+    #[arg(
+        long = "skip-overlap-over-longer-attachment",
+        visible_alias = "skip-score2-attachment"
+    )]
     skip_score2_attachment: bool,
 
     /// Optional minimum read length filter (bp).
@@ -97,6 +142,30 @@ struct RunCli {
     /// Optional minimum reads per TU (filters outputs).
     #[arg(long)]
     min_tu_count: Option<u64>,
+
+    /// TU identifier strategy used by the clustering stage.
+    #[arg(long, default_value = "stable", value_parser = ["stable", "sequential"])]
+    tu_id_style: String,
+
+    /// Minimum TU/gene overlap in base pairs.
+    #[arg(long, default_value_t = 1)]
+    gene_min_overlap_bp: u32,
+
+    /// Minimum fraction of a TU covered by a qualifying gene relationship.
+    #[arg(long, default_value_t = 0.0)]
+    gene_min_tu_fraction: f64,
+
+    /// Minimum fraction of a gene covered by a qualifying TU relationship.
+    #[arg(long, default_value_t = 0.0)]
+    gene_min_gene_fraction: f64,
+
+    /// Maximum best-vs-second assignment-score margin classified as ambiguous.
+    #[arg(long, default_value_t = 0.02)]
+    ambiguity_margin: f64,
+
+    /// Split ambiguous reads equally across all candidates within the ambiguity margin.
+    #[arg(long)]
+    fractional_assignment: bool,
 
     /// Print a timing breakdown to stderr.
     #[arg(long)]
@@ -130,23 +199,48 @@ struct MapCli {
     #[arg(long, default_value_t = 0)]
     min_mapq: u8,
 
-    /// Additional minimap2 arguments provided as one whitespace-separated string.
-    #[arg(long, default_value = "-ax map-ont")]
-    minimap2_args: String,
+    /// One additional minimap2 argument. Repeat this flag to preserve argument boundaries.
+    #[arg(
+        long = "minimap2-arg",
+        action = clap::ArgAction::Append,
+        allow_hyphen_values = true,
+        conflicts_with = "minimap2_args_compat"
+    )]
+    minimap2_arg: Vec<OsString>,
+
+    /// Deprecated: whitespace-separated minimap2 arguments.
+    ///
+    /// Use repeated --minimap2-arg values instead. This compatibility option cannot represent
+    /// an individual argument containing whitespace and conflicts with --minimap2-arg.
+    #[arg(
+        long = "minimap2-args",
+        value_name = "ARGS",
+        allow_hyphen_values = true,
+        conflicts_with = "minimap2_arg"
+    )]
+    minimap2_args_compat: Option<String>,
+
+    /// minimap2 executable name or explicit path.
+    #[arg(long, default_value = "minimap2")]
+    minimap2: PathBuf,
+
+    /// samtools executable name or explicit path.
+    #[arg(long, default_value = "samtools")]
+    samtools: PathBuf,
 }
 
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "trackclustertu bam-to-bed",
     version,
-    about = "Convert BAM input(s) to BED6"
+    about = "Convert BAM input(s) to BED6 with optional evidence and pre-clustering filters"
 )]
 struct BamToBedCli {
     /// Single input BAM file.
     #[arg(long = "in-bam", conflicts_with = "manifest", requires = "out_bed")]
     input_bam: Option<PathBuf>,
 
-    /// BAM manifest TSV with columns: sample, reads, [group].
+    /// BAM manifest TSV with sample, reads, [group], [evidence], [library_profile].
     #[arg(long, conflicts_with = "input_bam", requires = "out_dir")]
     manifest: Option<PathBuf>,
 
@@ -157,6 +251,49 @@ struct BamToBedCli {
     /// Output directory for manifest mode.
     #[arg(long, requires = "manifest")]
     out_dir: Option<PathBuf>,
+
+    /// Optional versioned per-record evidence TSV for single-BAM mode.
+    #[arg(
+        long = "out-evidence",
+        requires = "input_bam",
+        conflicts_with = "manifest"
+    )]
+    out_evidence: Option<PathBuf>,
+
+    /// Optional read evidence TSV keyed by read_name for single-BAM mode.
+    ///
+    /// Recognized optional columns are poly_a_evidence, five_prime_adapter_evidence,
+    /// three_prime_adapter_evidence, full_length_evidence, and library_preparation.
+    #[arg(
+        long = "in-evidence",
+        requires = "input_bam",
+        conflicts_with = "manifest"
+    )]
+    input_evidence: Option<PathBuf>,
+
+    /// Emit one versioned evidence TSV per sample in manifest mode.
+    #[arg(long, requires = "manifest", conflicts_with = "input_bam")]
+    emit_evidence: bool,
+
+    /// Library chemistry used to interpret optional full-length evidence.
+    ///
+    /// direct-rna infers full length from poly(A)+5' adapter evidence; direct-cdna and
+    /// pcr-cdna infer it from 5'+3' adapter evidence. Inference is only used when
+    /// --require-full-length is set, so the default BED6 behavior is unchanged.
+    #[arg(long, default_value = "direct-rna")]
+    library_profile: crate::bam::LibraryProfile,
+
+    /// Minimum mapping quality retained in BED6 (default preserves all MAPQ values).
+    #[arg(long, default_value_t = 0)]
+    min_mapq: u8,
+
+    /// Retain only reads with explicit or profile-inferred full-length evidence.
+    #[arg(long)]
+    require_full_length: bool,
+
+    /// Minimum exact chrom/start/end/strand support retained before clustering.
+    #[arg(long, default_value_t = 1)]
+    min_boundary_support: usize,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -203,25 +340,17 @@ fn ensure_path_exists(path: &Path, label: &str) -> Result<()> {
 }
 
 fn write_manifest(manifest_path: &Path, records: &[SampleManifestRecord]) -> Result<()> {
-    let mut writer = BufWriter::new(
-        File::create(manifest_path)
-            .with_context(|| format!("failed to create manifest {:?}", manifest_path))?,
-    );
-    writeln!(writer, "sample\tgroup\treads")?;
+    let mut writer = DelimitedWriter::create(manifest_path, Delimiter::Tab, &[])?;
+    writer.write_record(["sample", "group", "reads"])?;
     for record in records {
-        writeln!(
-            writer,
-            "{}\t{}\t{}",
-            record.sample,
-            record.group.as_deref().unwrap_or(""),
-            record.reads.display()
-        )?;
+        writer.write_record([
+            record.sample.clone(),
+            record.group.clone().unwrap_or_default(),
+            record.reads.display().to_string(),
+        ])?;
     }
+    writer.flush()?;
     Ok(())
-}
-
-fn split_whitespace_args(raw: &str) -> Vec<String> {
-    raw.split_whitespace().map(str::to_owned).collect()
 }
 
 fn ensure_success(status: std::process::ExitStatus, step: &str, log_path: &Path) -> Result<()> {
@@ -235,16 +364,386 @@ fn ensure_success(status: std::process::ExitStatus, step: &str, log_path: &Path)
     }
 }
 
-struct MapConfig<'a> {
+#[derive(Clone, Debug)]
+struct RawMapConfig {
+    manifest: PathBuf,
+    reference_fasta: PathBuf,
+    out_dir: PathBuf,
+    threads: Option<usize>,
+    min_mapq: u8,
+    minimap2_arg: Vec<OsString>,
+    minimap2_args_compat: Option<String>,
+    minimap2: PathBuf,
+    samtools: PathBuf,
+}
+
+/// Validated, fully effective configuration for the complete `map` command.
+///
+/// Unlike `SampleMapConfig`, this owns canonical command inputs, resolved tools, effective
+/// defaults, and parsed sample records. Clap values cross into this type exactly once.
+#[derive(Clone, Debug)]
+struct MapConfig {
+    manifest: PathBuf,
+    reference_fasta: PathBuf,
+    out_dir: PathBuf,
+    threads: usize,
+    minimap2_threads: usize,
+    samtools_sort_threads: usize,
+    min_mapq: u8,
+    minimap2_args: Vec<OsString>,
+    minimap2: Executable,
+    samtools: Executable,
+    records: Vec<SampleManifestRecord>,
+    library_profile: crate::bam::LibraryProfile,
+}
+
+impl MapConfig {
+    fn validate(raw: RawMapConfig) -> Result<Self> {
+        let manifest = canonical_input_file(&raw.manifest, "manifest")?;
+        let reference_fasta = canonical_input_file(&raw.reference_fasta, "reference FASTA")?;
+        let threads = raw.threads.unwrap_or_else(default_threads);
+        if threads == 0 {
+            anyhow::bail!("--threads must be >= 1");
+        }
+        let (minimap2_threads, samtools_sort_threads) = allocate_pipeline_threads(threads);
+        let minimap2_args =
+            effective_minimap2_args(raw.minimap2_arg, raw.minimap2_args_compat.as_deref())?;
+        if raw.minimap2_args_compat.is_some() {
+            eprintln!(
+                "warning: --minimap2-args is deprecated; repeat --minimap2-arg for each argument"
+            );
+        }
+
+        let mut records = parse_manifest(&manifest)
+            .with_context(|| format!("failed to parse FASTQ manifest {manifest:?}"))?;
+        crate::tools::bam_to_bed::validate_unique_sanitized_sample_names(&records)?;
+        for record in &mut records {
+            record.reads = canonical_input_file(
+                &record.reads,
+                &format!("FASTQ for sample {:?}", record.sample),
+            )?;
+        }
+
+        let out_dir = absolute_path(&raw.out_dir)?;
+        let minimap2 = Executable::resolve(raw.minimap2, "minimap2")?;
+        let samtools = Executable::resolve(raw.samtools, "samtools")?;
+
+        Ok(Self {
+            manifest,
+            reference_fasta,
+            out_dir,
+            threads,
+            minimap2_threads,
+            samtools_sort_threads,
+            min_mapq: raw.min_mapq,
+            minimap2_args,
+            minimap2,
+            samtools,
+            records,
+            library_profile: crate::bam::LibraryProfile::default(),
+        })
+    }
+
+    fn input_descriptors(&self) -> Vec<InputDescriptor> {
+        let mut inputs = vec![
+            InputDescriptor::new("fastq_manifest", &self.manifest),
+            InputDescriptor::new("reference_fasta", &self.reference_fasta),
+        ];
+        inputs.extend(
+            self.records
+                .iter()
+                .map(|record| InputDescriptor::for_sample("fastq", &record.sample, &record.reads)),
+        );
+        inputs
+    }
+
+    fn effective_configuration(&self) -> Value {
+        json!({
+            "manifest": ManifestOsValue::path(&self.manifest),
+            "reference_fasta": ManifestOsValue::path(&self.reference_fasta),
+            "out_dir": ManifestOsValue::path(&self.out_dir),
+            "threads": self.threads,
+            "pipeline_threads": {
+                "minimap2": self.minimap2_threads,
+                "samtools_sort": self.samtools_sort_threads,
+            },
+            "min_mapq": self.min_mapq,
+            "minimap2_args": self.minimap2_args.iter()
+                .map(|argument| ManifestOsValue::new(argument))
+                .collect::<Vec<_>>(),
+            "minimap2": {
+                "requested": ManifestOsValue::path(self.minimap2.requested()),
+                "resolved": ManifestOsValue::path(self.minimap2.resolved()),
+            },
+            "samtools": {
+                "requested": ManifestOsValue::path(self.samtools.requested()),
+                "resolved": ManifestOsValue::path(self.samtools.resolved()),
+            },
+            "library_profile": self.library_profile.to_string(),
+            "sample_count": self.records.len(),
+        })
+    }
+}
+
+impl TryFrom<MapCli> for MapConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(cli: MapCli) -> Result<Self> {
+        Self::validate(RawMapConfig {
+            manifest: cli.manifest,
+            reference_fasta: cli.reference_fasta,
+            out_dir: cli.out_dir,
+            threads: cli.threads,
+            min_mapq: cli.min_mapq,
+            minimap2_arg: cli.minimap2_arg,
+            minimap2_args_compat: cli.minimap2_args_compat,
+            minimap2: cli.minimap2,
+            samtools: cli.samtools,
+        })
+    }
+}
+
+/// Validated configuration for `run`, including its owned mapping configuration.
+#[derive(Clone, Debug)]
+struct RunConfig {
+    map: MapConfig,
+    annotation_bed: Option<PathBuf>,
+    annotation_gff: Option<PathBuf>,
+    score1_threshold: f64,
+    score2_threshold: f64,
+    three_prime_tolerance_bp: u32,
+    max_five_prime_delta_bp: Option<u32>,
+    skip_score2_attachment: bool,
+    min_read_len: Option<u32>,
+    min_tu_count: Option<u64>,
+    tu_id_style: String,
+    gene_min_overlap_bp: u32,
+    gene_min_tu_fraction: f64,
+    gene_min_gene_fraction: f64,
+    ambiguity_margin: f64,
+    fractional_assignment: bool,
+    timings: bool,
+}
+
+impl TryFrom<RunCli> for RunConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(cli: RunCli) -> Result<Self> {
+        let RunCli {
+            manifest,
+            reference_fasta,
+            annotation_bed,
+            annotation_gff,
+            out_dir,
+            threads,
+            min_mapq,
+            minimap2_arg,
+            minimap2_args_compat,
+            minimap2,
+            samtools,
+            score1_threshold,
+            score2_threshold,
+            three_prime_tolerance_bp,
+            max_five_prime_delta_bp,
+            skip_score2_attachment,
+            min_read_len,
+            min_tu_count,
+            tu_id_style,
+            gene_min_overlap_bp,
+            gene_min_tu_fraction,
+            gene_min_gene_fraction,
+            ambiguity_margin,
+            fractional_assignment,
+            timings,
+        } = cli;
+
+        validate_unit_interval(score1_threshold, "--span-jaccard-threshold")?;
+        validate_unit_interval(score2_threshold, "--overlap-over-longer-threshold")?;
+        validate_unit_interval(ambiguity_margin, "--ambiguity-margin")?;
+        validate_unit_interval(gene_min_tu_fraction, "--gene-min-tu-fraction")?;
+        validate_unit_interval(gene_min_gene_fraction, "--gene-min-gene-fraction")?;
+        let annotation_bed = annotation_bed
+            .map(|path| canonical_input_file(&path, "annotation BED"))
+            .transpose()?;
+        let annotation_gff = annotation_gff
+            .map(|path| canonical_input_file(&path, "annotation GFF"))
+            .transpose()?;
+        if annotation_bed.is_some() && annotation_gff.is_some() {
+            anyhow::bail!("--annotation-bed conflicts with --annotation-gff");
+        }
+
+        let map = MapConfig::validate(RawMapConfig {
+            manifest,
+            reference_fasta,
+            out_dir,
+            threads,
+            min_mapq,
+            minimap2_arg,
+            minimap2_args_compat,
+            minimap2,
+            samtools,
+        })?;
+
+        Ok(Self {
+            map,
+            annotation_bed,
+            annotation_gff,
+            score1_threshold,
+            score2_threshold,
+            three_prime_tolerance_bp,
+            max_five_prime_delta_bp,
+            skip_score2_attachment,
+            min_read_len,
+            min_tu_count,
+            tu_id_style,
+            gene_min_overlap_bp,
+            gene_min_tu_fraction,
+            gene_min_gene_fraction,
+            ambiguity_margin,
+            fractional_assignment,
+            timings,
+        })
+    }
+}
+
+impl RunConfig {
+    fn input_descriptors(&self) -> Vec<InputDescriptor> {
+        let mut inputs = self.map.input_descriptors();
+        if let Some(path) = &self.annotation_bed {
+            inputs.push(InputDescriptor::new("annotation_bed", path));
+        }
+        if let Some(path) = &self.annotation_gff {
+            inputs.push(InputDescriptor::new("annotation_gff", path));
+        }
+        inputs
+    }
+
+    fn effective_configuration(&self) -> Value {
+        let generated_annotation_bed = self
+            .annotation_gff
+            .as_ref()
+            .map(|_| ManifestOsValue::path(&self.map.out_dir.join("annotation.bed")));
+        json!({
+            "mapping": self.map.effective_configuration(),
+            "annotation": {
+                "bed": self.annotation_bed.as_deref().map(ManifestOsValue::path),
+                "gff": self.annotation_gff.as_deref().map(ManifestOsValue::path),
+                "generated_bed": generated_annotation_bed,
+            },
+            "clustering": {
+                "input_format": "bed6",
+                "threads": self.map.threads,
+                "span_jaccard_threshold": self.score1_threshold,
+                "overlap_over_longer_threshold": self.score2_threshold,
+                "three_prime_tolerance_bp": self.three_prime_tolerance_bp,
+                "max_five_prime_delta_bp": self.max_five_prime_delta_bp,
+                "skip_overlap_over_longer_attachment": self.skip_score2_attachment,
+                "min_read_len": self.min_read_len,
+                "min_tu_count": self.min_tu_count,
+                "tu_id_style": self.tu_id_style,
+                "gene_min_overlap_bp": self.gene_min_overlap_bp,
+                "gene_min_tu_fraction": self.gene_min_tu_fraction,
+                "gene_min_gene_fraction": self.gene_min_gene_fraction,
+                "ambiguity_margin": self.ambiguity_margin,
+                "fractional_assignment": self.fractional_assignment,
+                "timings": self.timings,
+                "out_dir": ManifestOsValue::path(&self.map.out_dir),
+            },
+            "outputs": {
+                "bam_dir": ManifestOsValue::path(&self.map.out_dir.join("bam")),
+                "bed_dir": ManifestOsValue::path(&self.map.out_dir.join("bed")),
+                "logs_dir": ManifestOsValue::path(&self.map.out_dir.join("logs")),
+                "bam_manifest": ManifestOsValue::path(&self.map.out_dir.join("samples.bam.tsv")),
+                "bed_manifest": ManifestOsValue::path(&self.map.out_dir.join("samples.bed.tsv")),
+                "run_manifest": ManifestOsValue::path(
+                    &self.map.out_dir.join(crate::tools::run_manifest::RUN_MANIFEST_FILE_NAME)
+                ),
+            },
+        })
+    }
+}
+
+fn validate_unit_interval(value: f64, flag: &str) -> Result<()> {
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        anyhow::bail!("{flag} must be finite and between 0 and 1, got {value}")
+    }
+}
+
+fn canonical_input_file(path: &Path, label: &str) -> Result<PathBuf> {
+    ensure_path_exists(path, label)?;
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {label} {}", path.display()))?;
+    if !canonical.is_file() {
+        anyhow::bail!("{label} is not a regular file: {}", canonical.display());
+    }
+    Ok(canonical)
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()
+            .context("failed to resolve current directory")?
+            .join(path))
+    }
+}
+
+fn effective_minimap2_args(
+    repeated: Vec<OsString>,
+    compatibility: Option<&str>,
+) -> Result<Vec<OsString>> {
+    if !repeated.is_empty() && compatibility.is_some() {
+        anyhow::bail!("--minimap2-arg conflicts with deprecated --minimap2-args");
+    }
+    let mut effective = vec![OsString::from("-ax"), OsString::from("map-ont")];
+    if !repeated.is_empty() {
+        effective.extend(repeated);
+        return Ok(effective);
+    }
+    if let Some(raw) = compatibility {
+        effective.extend(raw.split_whitespace().map(OsString::from));
+    }
+    Ok(effective)
+}
+
+struct SampleMapConfig<'a> {
     reference_fasta: &'a Path,
     logs_dir: &'a Path,
     sample_stem: &'a str,
-    threads: usize,
+    minimap2_threads: usize,
+    samtools_sort_threads: usize,
     min_mapq: u8,
-    minimap2_args: &'a str,
+    minimap2_args: &'a [OsString],
+    minimap2: &'a Path,
+    samtools: &'a Path,
 }
 
-fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) -> Result<()> {
+fn allocate_pipeline_threads(total: usize) -> (usize, usize) {
+    // The mapper and sorter each need one allocated thread; samtools view stays single-threaded.
+    // With a user budget of one, both configurable tools receive their minimum. For all larger
+    // budgets the allocations sum to the requested total. Give an odd spare worker to the mapper.
+    if total <= 1 {
+        return (1, 1);
+    }
+    let samtools_sort_threads = total / 2;
+    let minimap2_threads = total - samtools_sort_threads;
+    (minimap2_threads, samtools_sort_threads)
+}
+
+fn samtools_sort_additional_threads(allocated_threads: usize) -> usize {
+    // `samtools sort -@` excludes its main thread from the requested count.
+    allocated_threads.saturating_sub(1)
+}
+
+fn map_fastq_to_bam(
+    config: &SampleMapConfig<'_>,
+    fastq_path: &Path,
+    bam_path: &Path,
+) -> Result<()> {
     let minimap2_log = config
         .logs_dir
         .join(format!("{}.minimap2.log", config.sample_stem));
@@ -258,13 +757,11 @@ fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) 
         .logs_dir
         .join(format!("{}.samtools_index.log", config.sample_stem));
 
-    let mut minimap2 = Command::new("minimap2");
-    for arg in split_whitespace_args(config.minimap2_args) {
-        minimap2.arg(arg);
-    }
+    let mut minimap2 = Command::new(config.minimap2);
+    minimap2.args(config.minimap2_args);
     minimap2
         .arg("-t")
-        .arg(config.threads.to_string())
+        .arg(config.minimap2_threads.to_string())
         .arg(config.reference_fasta)
         .arg(fastq_path)
         .stdout(Stdio::piped())
@@ -282,7 +779,7 @@ fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) 
         .take()
         .context("failed to capture minimap2 stdout")?;
 
-    let mut samtools_view = Command::new("samtools");
+    let mut samtools_view = Command::new(config.samtools);
     samtools_view
         .arg("view")
         .arg("-b")
@@ -309,11 +806,11 @@ fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) 
         .take()
         .context("failed to capture samtools view stdout")?;
 
-    let mut samtools_sort = Command::new("samtools");
+    let mut samtools_sort = Command::new(config.samtools);
     samtools_sort
         .arg("sort")
         .arg("-@")
-        .arg(config.threads.to_string())
+        .arg(samtools_sort_additional_threads(config.samtools_sort_threads).to_string())
         .arg("-o")
         .arg(bam_path)
         .arg("-")
@@ -336,7 +833,7 @@ fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) 
     ensure_success(view_status, "samtools view", &samtools_view_log)?;
     ensure_success(minimap2_status, "minimap2", &minimap2_log)?;
 
-    let index_status = Command::new("samtools")
+    let index_status = Command::new(config.samtools)
         .arg("index")
         .arg(bam_path)
         .stderr(Stdio::from(
@@ -350,42 +847,32 @@ fn map_fastq_to_bam(config: &MapConfig<'_>, fastq_path: &Path, bam_path: &Path) 
     Ok(())
 }
 
-fn run_map(cli: &MapCli) -> Result<PathBuf> {
-    ensure_path_exists(&cli.manifest, "manifest")?;
-    ensure_path_exists(&cli.reference_fasta, "reference FASTA")?;
-
-    let threads = cli.threads.unwrap_or_else(default_threads);
-    if threads == 0 {
-        anyhow::bail!("--threads must be >= 1");
-    }
-
-    let records = parse_manifest(&cli.manifest)
-        .with_context(|| format!("failed to parse FASTQ manifest {:?}", cli.manifest))?;
-    crate::tools::bam_to_bed::validate_unique_sanitized_sample_names(&records)?;
-
-    fs::create_dir_all(&cli.out_dir)
-        .with_context(|| format!("failed to create output directory {:?}", cli.out_dir))?;
-    let bam_dir = cli.out_dir.join("bam");
-    let logs_dir = cli.out_dir.join("logs");
+fn execute_map(config: &MapConfig) -> Result<PathBuf> {
+    fs::create_dir_all(&config.out_dir)
+        .with_context(|| format!("failed to create output directory {:?}", config.out_dir))?;
+    let bam_dir = config.out_dir.join("bam");
+    let logs_dir = config.out_dir.join("logs");
     fs::create_dir_all(&bam_dir)
         .with_context(|| format!("failed to create BAM output directory {:?}", bam_dir))?;
     fs::create_dir_all(&logs_dir)
         .with_context(|| format!("failed to create log output directory {:?}", logs_dir))?;
 
-    let mut bam_records: Vec<SampleManifestRecord> = Vec::with_capacity(records.len());
-    for record in &records {
-        ensure_path_exists(&record.reads, "FASTQ")?;
+    let mut bam_records: Vec<SampleManifestRecord> = Vec::with_capacity(config.records.len());
+    for record in &config.records {
         let sample_stem = crate::tools::bam_to_bed::sanitize_sample_name(&record.sample);
         let bam_path = bam_dir.join(format!("{sample_stem}.sorted.bam"));
-        let config = MapConfig {
-            reference_fasta: &cli.reference_fasta,
+        let sample_config = SampleMapConfig {
+            reference_fasta: &config.reference_fasta,
             logs_dir: &logs_dir,
             sample_stem: &sample_stem,
-            threads,
-            min_mapq: cli.min_mapq,
-            minimap2_args: &cli.minimap2_args,
+            minimap2_threads: config.minimap2_threads,
+            samtools_sort_threads: config.samtools_sort_threads,
+            min_mapq: config.min_mapq,
+            minimap2_args: &config.minimap2_args,
+            minimap2: config.minimap2.resolved(),
+            samtools: config.samtools.resolved(),
         };
-        map_fastq_to_bam(&config, &record.reads, &bam_path)?;
+        map_fastq_to_bam(&sample_config, &record.reads, &bam_path)?;
         let bam_path = bam_path
             .canonicalize()
             .with_context(|| format!("failed to canonicalize BAM path {:?}", bam_path))?;
@@ -394,17 +881,18 @@ fn run_map(cli: &MapCli) -> Result<PathBuf> {
             sample: record.sample.clone(),
             reads: bam_path,
             group: record.group.clone(),
+            evidence: None,
         });
     }
 
-    let bam_manifest = cli.out_dir.join("samples.bam.tsv");
+    let bam_manifest = config.out_dir.join("samples.bam.tsv");
     write_manifest(&bam_manifest, &bam_records)?;
     let bam_manifest = bam_manifest
         .canonicalize()
         .with_context(|| format!("failed to canonicalize BAM manifest {:?}", bam_manifest))?;
 
     let bed_manifest =
-        crate::tools::bam_to_bed::convert_records_to_bed_manifest(&bam_records, &cli.out_dir)?;
+        crate::tools::bam_to_bed::convert_records_to_bed_manifest(&bam_records, &config.out_dir)?;
     let bed_manifest = bed_manifest
         .canonicalize()
         .with_context(|| format!("failed to canonicalize BED manifest {:?}", bed_manifest))?;
@@ -415,12 +903,36 @@ fn run_map(cli: &MapCli) -> Result<PathBuf> {
     Ok(bed_manifest)
 }
 
+fn run_map(config: &MapConfig) -> Result<PathBuf> {
+    let inputs = config.input_descriptors();
+    let publisher = RunManifestPublisher::new(&config.out_dir, &inputs)?;
+    let timestamp = crate::tools::run_manifest::timestamp_now()?;
+    let manifest = RunManifest::capture(
+        "map",
+        config.effective_configuration(),
+        config.library_profile.to_string(),
+        &inputs,
+        &[
+            ("minimap2", &config.minimap2),
+            ("samtools", &config.samtools),
+        ],
+        timestamp,
+    )?;
+
+    let bed_manifest = execute_map(config)?;
+    let manifest_path = publisher.final_path().to_path_buf();
+    publisher.publish(&manifest)?;
+    println!("run_manifest={}", manifest_path.display());
+    Ok(bed_manifest)
+}
+
 fn run_map_from_args<I>(args: I) -> Result<()>
 where
     I: IntoIterator<Item = OsString>,
 {
     let cli = MapCli::parse_from(args);
-    run_map(&cli).map(|_| ())
+    let config = MapConfig::try_from(cli)?;
+    run_map(&config).map(|_| ())
 }
 
 fn run_bam_to_bed_from_args<I>(args: I) -> Result<()>
@@ -428,22 +940,67 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let cli = BamToBedCli::parse_from(args);
+    let config = crate::bam::BamConversionConfig {
+        min_mapq: cli.min_mapq,
+        require_full_length: cli.require_full_length,
+        min_boundary_support: cli.min_boundary_support,
+        library_profile: cli.library_profile,
+    };
     match (cli.input_bam.as_deref(), cli.manifest.as_deref()) {
         (Some(input_bam), None) => {
             let out_bed = cli.out_bed.as_deref().expect("required by clap");
-            crate::tools::bam_to_bed::convert_single_bam_to_bed(input_bam, out_bed)?;
+            let mut inputs = vec![input_bam.to_path_buf()];
+            if let Some(path) = &cli.input_evidence {
+                inputs.push(path.clone());
+            }
+            let mut outputs = vec![out_bed.to_path_buf()];
+            if let Some(path) = &cli.out_evidence {
+                outputs.push(path.clone());
+            }
+            let transaction = OutputTransaction::new(inputs, outputs)?;
+            let staged_bed = transaction.staged_path(out_bed)?;
+            let staged_evidence = cli
+                .out_evidence
+                .as_deref()
+                .map(|path| transaction.staged_path(path))
+                .transpose()?;
+            let summary = crate::tools::bam_to_bed::convert_single_bam_to_bed_with_config(
+                input_bam,
+                &staged_bed,
+                staged_evidence.as_deref(),
+                cli.input_evidence.as_deref(),
+                &config,
+            )?;
+            transaction.commit()?;
             println!("out_bed={}", out_bed.display());
+            if let Some(path) = &cli.out_evidence {
+                println!("out_evidence={}", path.display());
+            }
+            print_bam_conversion_summary(&summary);
             Ok(())
         }
         (None, Some(manifest)) => {
             let out_dir = cli.out_dir.as_deref().expect("required by clap");
-            let bed_manifest =
-                crate::tools::bam_to_bed::convert_manifest_to_bed_manifest(manifest, out_dir)?;
-            println!("bed_manifest={}", bed_manifest.display());
+            let result = crate::tools::bam_to_bed::convert_manifest_to_bed_manifest_with_config(
+                manifest,
+                out_dir,
+                &config,
+                cli.emit_evidence,
+            )?;
+            println!("bed_manifest={}", result.bed_manifest.display());
+            print_bam_conversion_summary(&result.summary);
             Ok(())
         }
         _ => anyhow::bail!("pass either --in-bam/--out-bed or --manifest/--out-dir"),
     }
+}
+
+fn print_bam_conversion_summary(summary: &crate::bam::BamConversionSummary) {
+    eprint!("bam_to_bed_counts");
+    for (name, value) in summary.fields() {
+        eprint!("\t{name}={value}");
+    }
+    eprintln!();
 }
 
 fn run_gff_to_bed_from_args<I>(args: I) -> Result<()>
@@ -451,38 +1008,36 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let cli = GffToBedCli::parse_from(args);
-    crate::tools::gff_to_bed::convert_gff_to_bed(&cli.annotation_gff, &cli.out_bed)
+    let transaction = OutputTransaction::new([&cli.annotation_gff], [&cli.out_bed])?;
+    let staged_bed = transaction.staged_path(&cli.out_bed)?;
+    crate::tools::gff_to_bed::convert_gff_to_bed(&cli.annotation_gff, &staged_bed)?;
+    transaction.commit()
 }
 
-fn push_optional_arg(args: &mut Vec<OsString>, flag: &str, value: Option<impl ToString>) {
-    if let Some(value) = value {
-        args.push(OsString::from(flag));
-        args.push(OsString::from(value.to_string()));
-    }
-}
+fn run_full_pipeline(config: &RunConfig) -> Result<()> {
+    let inputs = config.input_descriptors();
+    let publisher = RunManifestPublisher::new(&config.map.out_dir, &inputs)?;
+    let timestamp = crate::tools::run_manifest::timestamp_now()?;
+    let manifest = RunManifest::capture(
+        "run",
+        config.effective_configuration(),
+        config.map.library_profile.to_string(),
+        &inputs,
+        &[
+            ("minimap2", &config.map.minimap2),
+            ("samtools", &config.map.samtools),
+        ],
+        timestamp,
+    )?;
 
-fn push_optional_path(args: &mut Vec<OsString>, flag: &str, value: Option<&Path>) {
-    if let Some(value) = value {
-        args.push(OsString::from(flag));
-        args.push(value.as_os_str().to_owned());
-    }
-}
+    // `run` owns publication of the final run manifest. The mapping stage therefore executes
+    // directly instead of publishing an intermediate map-only manifest at the same path.
+    let bed_manifest = execute_map(&config.map)?;
 
-fn run_full_pipeline(cli: &RunCli) -> Result<()> {
-    let map_cli = MapCli {
-        manifest: cli.manifest.clone(),
-        reference_fasta: cli.reference_fasta.clone(),
-        out_dir: cli.out_dir.clone(),
-        threads: cli.threads,
-        min_mapq: cli.min_mapq,
-        minimap2_args: cli.minimap2_args.clone(),
-    };
-    let bed_manifest = run_map(&map_cli)?;
-
-    let annotation_bed = match (&cli.annotation_bed, &cli.annotation_gff) {
+    let annotation_bed = match (&config.annotation_bed, &config.annotation_gff) {
         (Some(path), None) => Some(path.clone()),
         (None, Some(gff)) => {
-            let out_bed = cli.out_dir.join("annotation.bed");
+            let out_bed = config.map.out_dir.join("annotation.bed");
             crate::tools::gff_to_bed::convert_gff_to_bed(gff, &out_bed)?;
             Some(
                 out_bed
@@ -494,51 +1049,46 @@ fn run_full_pipeline(cli: &RunCli) -> Result<()> {
         (Some(_), Some(_)) => unreachable!("clap enforces conflict"),
     };
 
-    let mut cluster_args = vec![
-        OsString::from("trackclustertu cluster"),
-        OsString::from("--manifest"),
-        bed_manifest.as_os_str().to_owned(),
-        OsString::from("--format"),
-        OsString::from("bed6"),
-        OsString::from("--out-dir"),
-        cli.out_dir.as_os_str().to_owned(),
-    ];
-    push_optional_path(
-        &mut cluster_args,
-        "--annotation-bed",
-        annotation_bed.as_deref(),
-    );
-    push_optional_arg(&mut cluster_args, "--threads", cli.threads);
-    push_optional_arg(
-        &mut cluster_args,
-        "--score1-threshold",
-        Some(cli.score1_threshold),
-    );
-    push_optional_arg(
-        &mut cluster_args,
-        "--score2-threshold",
-        Some(cli.score2_threshold),
-    );
-    push_optional_arg(
-        &mut cluster_args,
-        "--three-prime-tolerance-bp",
-        Some(cli.three_prime_tolerance_bp),
-    );
-    push_optional_arg(
-        &mut cluster_args,
-        "--max-5p-delta",
-        cli.max_five_prime_delta_bp,
-    );
-    if cli.skip_score2_attachment {
-        cluster_args.push(OsString::from("--skip-score2-attachment"));
-    }
-    push_optional_arg(&mut cluster_args, "--min-read-len", cli.min_read_len);
-    push_optional_arg(&mut cluster_args, "--min-tu-count", cli.min_tu_count);
-    if cli.timings {
-        cluster_args.push(OsString::from("--timings"));
-    }
-
-    crate::tools::cluster_pipeline::run_cluster_from_args(cluster_args)
+    let tu_id_style = match config.tu_id_style.as_str() {
+        "stable" => TuIdStyle::Stable,
+        "sequential" => TuIdStyle::Sequential,
+        _ => unreachable!("RunCli constrains --tu-id-style"),
+    };
+    let annotation = annotation_bed.map(|bed| AnnotationRequest {
+        bed,
+        min_overlap_bp: config.gene_min_overlap_bp,
+        min_tu_fraction: config.gene_min_tu_fraction,
+        min_gene_fraction: config.gene_min_gene_fraction,
+    });
+    let cluster_config = ClusterConfig::validate(ClusterRequest {
+        input: ClusterInput::Manifest(bed_manifest),
+        format: InputFormat::Bed6,
+        outputs: ClusterOutputPaths {
+            out_dir: Some(config.map.out_dir.clone()),
+            ..ClusterOutputPaths::default()
+        },
+        options: ClusterOptions {
+            span_jaccard_threshold: config.score1_threshold,
+            overlap_over_longer_threshold: config.score2_threshold,
+            three_prime_tolerance_bp: config.three_prime_tolerance_bp,
+            max_five_prime_delta_bp: config.max_five_prime_delta_bp,
+            attach_contained_reads: !config.skip_score2_attachment,
+            ambiguity_margin: config.ambiguity_margin,
+            fractional_assignment: config.fractional_assignment,
+            tu_id_style,
+            strict_read_errors: false,
+        },
+        min_read_len: config.min_read_len,
+        min_tu_count: config.min_tu_count,
+        annotation,
+        threads: Some(config.map.threads),
+        timings: config.timings,
+    })?;
+    crate::tools::cluster_pipeline::run_cluster(cluster_config)?;
+    let manifest_path = publisher.final_path().to_path_buf();
+    publisher.publish(&manifest)?;
+    println!("run_manifest={}", manifest_path.display());
+    Ok(())
 }
 
 fn run_full_from_args<I>(args: I) -> Result<()>
@@ -546,7 +1096,8 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let cli = RunCli::parse_from(args);
-    run_full_pipeline(&cli)
+    let config = RunConfig::try_from(cli)?;
+    run_full_pipeline(&config)
 }
 
 pub fn entrypoint() -> Result<()> {
@@ -564,7 +1115,7 @@ pub fn entrypoint() -> Result<()> {
             Ok(())
         }
         Some("-V") | Some("--version") => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            println!("trackclustertu {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         Some("run") => run_full_from_args(prepend_program("trackclustertu run", args)),
@@ -596,5 +1147,149 @@ pub fn entrypoint() -> Result<()> {
         }
         Some(other) => anyhow::bail!("unknown subcommand {other:?}\n\n{TOP_LEVEL_HELP}"),
         None => unreachable!("command already checked"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use clap::error::ErrorKind;
+    use clap::Parser;
+
+    use super::{
+        allocate_pipeline_threads, effective_minimap2_args, samtools_sort_additional_threads,
+        MapCli,
+    };
+
+    #[test]
+    fn concurrent_mapper_and_sorter_split_the_thread_budget() {
+        assert_eq!(allocate_pipeline_threads(1), (1, 1));
+        assert_eq!(allocate_pipeline_threads(2), (1, 1));
+        assert_eq!(allocate_pipeline_threads(3), (2, 1));
+        assert_eq!(allocate_pipeline_threads(8), (4, 4));
+
+        for total in 2..=32 {
+            let (mapper, sorter) = allocate_pipeline_threads(total);
+            assert!(mapper >= 1);
+            assert!(sorter >= 1);
+            assert_eq!(mapper + sorter, total);
+        }
+
+        assert_eq!(samtools_sort_additional_threads(1), 0);
+        assert_eq!(samtools_sort_additional_threads(4), 3);
+    }
+
+    #[test]
+    fn repeated_minimap2_arguments_preserve_spaces_and_boundaries() {
+        let cli = MapCli::try_parse_from([
+            OsString::from("trackclustertu map"),
+            OsString::from("--manifest"),
+            OsString::from("manifest with spaces.tsv"),
+            OsString::from("--reference-fasta"),
+            OsString::from("reference with spaces.fa"),
+            OsString::from("--out-dir"),
+            OsString::from("output with spaces"),
+            OsString::from("--minimap2-arg"),
+            OsString::from("-ax"),
+            OsString::from("--minimap2-arg"),
+            OsString::from("one argument with spaces"),
+            OsString::from("--minimap2"),
+            OsString::from("tools with spaces/minimap2"),
+            OsString::from("--samtools"),
+            OsString::from("tools with spaces/samtools"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli.minimap2_arg,
+            vec![
+                OsString::from("-ax"),
+                OsString::from("one argument with spaces")
+            ]
+        );
+        assert_eq!(cli.minimap2, PathBuf::from("tools with spaces/minimap2"));
+        assert_eq!(cli.samtools, PathBuf::from("tools with spaces/samtools"));
+    }
+
+    #[test]
+    fn deprecated_minimap2_args_conflicts_with_lossless_form() {
+        let error = MapCli::try_parse_from([
+            "trackclustertu map",
+            "--manifest",
+            "samples.tsv",
+            "--reference-fasta",
+            "reference.fa",
+            "--out-dir",
+            "output",
+            "--minimap2-arg",
+            "-ax",
+            "--minimap2-args",
+            "-x map-ont",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn minimap2_defaults_precede_additional_arguments() {
+        assert_eq!(
+            effective_minimap2_args(Vec::new(), None).unwrap(),
+            vec![OsString::from("-ax"), OsString::from("map-ont")]
+        );
+        assert_eq!(
+            effective_minimap2_args(vec![OsString::from("--secondary=no")], None).unwrap(),
+            vec![
+                OsString::from("-ax"),
+                OsString::from("map-ont"),
+                OsString::from("--secondary=no")
+            ]
+        );
+        assert_eq!(
+            effective_minimap2_args(Vec::new(), Some("-ax map-pb --secondary=no")).unwrap(),
+            vec![
+                OsString::from("-ax"),
+                OsString::from("map-ont"),
+                OsString::from("-ax"),
+                OsString::from("map-pb"),
+                OsString::from("--secondary=no")
+            ]
+        );
+
+        let cli = MapCli::try_parse_from([
+            "trackclustertu map",
+            "--manifest",
+            "samples.tsv",
+            "--reference-fasta",
+            "reference.fa",
+            "--out-dir",
+            "output",
+            "--minimap2-args",
+            "-ax map-ont",
+        ])
+        .unwrap();
+        assert_eq!(cli.minimap2_args_compat.as_deref(), Some("-ax map-ont"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repeated_minimap2_arguments_accept_non_utf8_os_values() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let raw = OsString::from_vec(vec![b'a', 0x80, b' ', b'b']);
+        let cli = MapCli::try_parse_from(vec![
+            OsString::from("trackclustertu map"),
+            OsString::from("--manifest"),
+            OsString::from("samples.tsv"),
+            OsString::from("--reference-fasta"),
+            OsString::from("reference.fa"),
+            OsString::from("--out-dir"),
+            OsString::from("output"),
+            OsString::from("--minimap2-arg"),
+            raw.clone(),
+        ])
+        .unwrap();
+        assert_eq!(cli.minimap2_arg, vec![raw]);
     }
 }

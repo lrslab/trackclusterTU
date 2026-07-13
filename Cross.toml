@@ -1,0 +1,5 @@
+[build.env]
+passthrough = [
+  "TRACKCLUSTERTU_GIT_REVISION",
+  "TRACKCLUSTERTU_GIT_DIRTY",
+]

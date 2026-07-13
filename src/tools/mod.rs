@@ -1,5 +1,10 @@
-pub mod bam_to_bed;
-pub mod cluster_pipeline;
-pub mod diagnose_missed_tus;
-pub mod gff_to_bed;
-pub mod trackclustertu;
+pub(crate) mod bam_to_bed;
+pub(crate) mod cluster_pipeline;
+pub(crate) mod diagnose_missed_tus;
+pub(crate) mod domain_records;
+pub(crate) mod gff_to_bed;
+pub(crate) mod membership;
+pub(crate) mod output_transaction;
+pub(crate) mod read_rejections;
+pub(crate) mod run_manifest;
+pub(crate) mod trackclustertu;

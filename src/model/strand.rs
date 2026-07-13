@@ -1,19 +1,31 @@
+//! Genomic strand values and strict text parsing.
+
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// Genomic alignment or feature strand.
 pub enum Strand {
+    /// Forward (`+`) strand.
     Plus,
+    /// Reverse (`-`) strand.
     Minus,
+    /// Unspecified (`.`) strand.
     Unknown,
 }
 
 #[derive(Error, Debug)]
+/// Error returned when text is not `+`, `-`, or `.`.
 pub enum StrandParseError {
+    /// Invalid strand text.
     #[error("invalid strand {value:?}")]
-    Invalid { value: String },
+    Invalid {
+        /// Original invalid value.
+        value: String,
+    },
 }
 
 impl Strand {
+    /// Return the BED/GFF character representing the strand.
     pub fn as_char(self) -> char {
         match self {
             Self::Plus => '+',

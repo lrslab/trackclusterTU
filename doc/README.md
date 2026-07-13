@@ -13,4 +13,5 @@
 - Annotation conversion: `trackclustertu gff-to-bed`
 - Output directory + file formats: `doc/output_directory.md`
 - Performance notes + benchmarks: `doc/performance.md`
+- Maintainer GitHub release checklist and artifact verification: `doc/release.md`
 - Runnable examples: `examples/README.md`

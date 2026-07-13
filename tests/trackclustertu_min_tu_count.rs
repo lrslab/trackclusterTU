@@ -3,6 +3,9 @@ use std::io::Write;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod support;
+use support::{count_v1_projection, membership_v1_projection};
+
 fn unique_tmp_dir(prefix: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -34,13 +37,15 @@ fn trackclustertu_filters_low_support_tus() {
     let output = Command::new(exe)
         .args([
             "cluster",
+            "--tu-id-style",
+            "sequential",
             "--in",
             input_path.to_str().unwrap(),
             "--format",
             "bed6",
-            "--score1-threshold",
+            "--span-jaccard-threshold",
             "0.95",
-            "--score2-threshold",
+            "--overlap-over-longer-threshold",
             "0.99",
             "--min-tu-count",
             "2",
@@ -72,18 +77,21 @@ fn trackclustertu_filters_low_support_tus() {
 
     let membership_text = fs::read_to_string(&out_membership).unwrap();
     assert_eq!(
-        membership_text,
+        membership_v1_projection(&membership_text),
         concat!(
             "r1\tTU000001\t1.000000\t1.000000\n",
             "r2\tTU000001\t0.980198\t0.990000\n",
+            "r3\t.\t.\t.\n",
             "r4\tTU000002\t1.000000\t1.000000\n",
             "r5\tTU000002\t0.980198\t0.990000\n",
+            "r6\t.\t.\t.\n",
+            "r7\t.\t.\t.\n",
         )
     );
 
     let count_text = fs::read_to_string(&out_tu_count).unwrap();
     assert_eq!(
-        count_text,
+        count_v1_projection(&count_text),
         concat!("tu_id,count\n", "TU000001,2\n", "TU000002,2\n",)
     );
 

@@ -1,5 +1,5 @@
-tu_id	control	treated
-TU000001	2	0
-TU000002	0	1
-TU000003	1	1
-TU000004	0	1
+tu_id	control.unique_count	control.full_length_evidence_count	control.total_count	control.fractional_count	treated.unique_count	treated.full_length_evidence_count	treated.total_count	treated.fractional_count
+TUg_63687231_100_200_p	2	0	2	2	0	0	0	0
+TUg_63687231_120_180_p	0	0	0	0	1	0	1	1
+TUg_63687231_300_400_p	1	0	1	1	1	0	1	1
+TUg_63687231_500_600_p	0	0	0	0	1	0	1	1

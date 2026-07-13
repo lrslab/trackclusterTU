@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
-use trackcluster_rs::interval::{intersection_len, union_len};
-use trackcluster_rs::model::{Coord, Interval};
-use trackcluster_rs::score::{score1_interval, score2_interval};
+use trackclustertu::interval::{intersection_len, union_len};
+use trackclustertu::model::{Coord, Interval};
+use trackclustertu::score::{score1_interval, score2_interval};
 
 fn interval(start: u32, end: u32) -> Interval {
     Interval::new(Coord::new(start), Coord::new(end)).unwrap()

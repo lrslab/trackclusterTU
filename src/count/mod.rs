@@ -1,17 +1,22 @@
+//! Legacy TrackCluster-style subread counting helpers.
+
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::path::Path;
 
+use crate::io::delimited::{DelimitedWriter, Delimiter};
 use crate::model::Transcript;
 
 #[derive(Debug, Default, Clone, PartialEq)]
+/// A fractional molecule count associated with an isoform identifier.
 pub struct CountRecord {
+    /// Isoform identifier.
     pub isoform_id: String,
+    /// Sum of molecule weights assigned to the isoform.
     pub count: f64,
 }
 
 fn parse_subreads(tx: &Transcript) -> Vec<&str> {
-    let Some(name2) = tx.extra_fields.first() else {
+    let Some(name2) = tx.extra_fields().first() else {
         return Vec::new();
     };
     if !name2.contains(',') {
@@ -25,8 +30,15 @@ fn parse_subreads(tx: &Transcript) -> Vec<&str> {
         .collect()
 }
 
+/// Count subreads encoded in the first extra BED12 field.
+///
+/// The legacy encoding is the comma-separated prefix before `,|`, for example
+/// `read-1,read-2,|metadata`. A subread occurring in several isoforms contributes
+/// an equal fraction to each occurrence. Names matching any transcript in
+/// `references` are excluded from molecule counts. The result contains exactly
+/// one row per input isoform in input order, including zero-count isoforms.
 pub fn count_by_subreads(isoforms: &[Transcript], references: &[Transcript]) -> Vec<CountRecord> {
-    let ref_names: HashSet<&str> = references.iter().map(|tx| tx.name.as_str()).collect();
+    let ref_names: HashSet<&str> = references.iter().map(Transcript::name).collect();
 
     let mut occ: HashMap<&str, u32> = HashMap::new();
     for isoform in isoforms {
@@ -55,27 +67,42 @@ pub fn count_by_subreads(isoforms: &[Transcript], references: &[Transcript]) -> 
             }
 
             CountRecord {
-                isoform_id: isoform.name.clone(),
+                isoform_id: isoform.name().to_owned(),
                 count: coverage,
             }
         })
         .collect()
 }
 
+/// Create a two-column `isoform_id,count` CSV file.
+///
+/// Records retain input order. Fields use standard CSV quoting, including
+/// identifiers containing commas, quotes, or line breaks.
+///
+/// # Errors
+///
+/// Returns an I/O error if `path` cannot be created or written.
 pub fn write_counts_csv<P: AsRef<Path>>(
     path: P,
     records: &[CountRecord],
 ) -> Result<(), std::io::Error> {
-    let mut writer = std::io::BufWriter::new(std::fs::File::create(path)?);
-    writeln!(&mut writer, "isoform_id,count")?;
+    let mut writer = DelimitedWriter::create(path.as_ref(), Delimiter::Comma, &[])
+        .map_err(std::io::Error::other)?;
+    writer
+        .write_record(["isoform_id", "count"])
+        .map_err(std::io::Error::other)?;
     for record in records {
-        writeln!(&mut writer, "{},{}", record.isoform_id, record.count)?;
+        writer
+            .write_record([record.isoform_id.clone(), record.count.to_string()])
+            .map_err(std::io::Error::other)?;
     }
+    writer.flush().map_err(std::io::Error::other)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::io::delimited::{DelimitedReader, Delimiter};
     use crate::model::{Bed12Attrs, Coord, Interval, Strand, Transcript};
 
     use super::*;
@@ -123,5 +150,32 @@ mod tests {
         assert!((iso1.count - 1.5).abs() < 1e-9);
         assert!((iso2.count - 0.5).abs() < 1e-9);
         assert!((iso3.count - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn count_csv_round_trips_adversarial_identifier() {
+        let root = std::env::temp_dir().join(format!(
+            "trackclustertu_count_csv_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("counts.csv");
+        let id = "isoform,tab\tquote\"line\r\nbreak";
+        write_counts_csv(
+            &path,
+            &[CountRecord {
+                isoform_id: id.to_owned(),
+                count: 1.5,
+            }],
+        )
+        .unwrap();
+        let mut reader = DelimitedReader::open(&path, Delimiter::Comma).unwrap();
+        let rows = reader.records().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(rows[1].fields().get(0), Some(id));
+        assert_eq!(rows[1].fields().get(1), Some("1.5"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

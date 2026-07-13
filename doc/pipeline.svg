@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 940" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
   <title id="title">trackclusterTU pipeline and method overview</title>
-  <desc id="desc">Simplified publication figure showing the trackclusterTU pipeline, two-round TU clustering, and optional missed-TU rescue process.</desc>
+  <desc id="desc">Simplified publication figure showing the trackclusterTU pipeline, two-round TU clustering, and independent optional diagnostic and missed-TU rescue branches.</desc>
   <defs>
     <marker id="arrowTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10Z" fill="#0f766e"/>
@@ -42,7 +42,7 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1600" height="940" fill="#ffffff"/>
+  <rect x="0" y="0" width="1600" height="1000" fill="#ffffff"/>
 
   <g transform="translate(80 64)">
     <text class="title" x="0" y="0">trackclusterTU pipeline</text>
@@ -51,8 +51,8 @@
 
   <g transform="translate(1190 42)">
     <rect class="note" x="0" y="0" width="330" height="92" rx="10"/>
-    <text class="mono" x="22" y="31">score1 = overlap / union</text>
-    <text class="mono" x="22" y="55">score2 = overlap / max(len)</text>
+    <text class="mono" x="22" y="31">span Jaccard = overlap / union</text>
+    <text class="mono" x="22" y="55">overlap / longer = overlap / max(len)</text>
     <text class="mono" x="22" y="79">default thresholds: 0.95, 0.80</text>
   </g>
 
@@ -88,8 +88,8 @@
     <g transform="translate(876 58)">
       <rect class="box-teal" x="0" y="0" width="212" height="110" rx="8"/>
       <text class="box-title-teal" x="18" y="31">TU clustering</text>
-      <text class="body" x="18" y="55">round 1: score1 seeds</text>
-      <text class="body" x="18" y="78">round 2: score2 attach</text>
+      <text class="body" x="18" y="55">round 1: span-Jaccard seeds</text>
+      <text class="body" x="18" y="78">round 2: overlap/longer attach</text>
       <g transform="translate(23 89)">
         <path class="read-teal" d="M0 0h58"/>
         <path class="read-orange" d="M78 0h58"/>
@@ -133,7 +133,7 @@
     <g transform="translate(442 78)">
       <rect class="box-teal" x="0" y="0" width="260" height="144" rx="8"/>
       <text class="box-title-teal" x="20" y="30">Round 1</text>
-      <text class="body" x="20" y="54">seed clusters by score1</text>
+      <text class="body" x="20" y="54">seed clusters by span Jaccard</text>
       <text class="small" x="20" y="75">high-overlap intervals joined by DSU</text>
       <g transform="translate(30 92)">
         <path class="read-teal" d="M0 0h80M12 17h78M4 34h80"/>
@@ -148,7 +148,7 @@
       <rect class="box-teal" x="0" y="0" width="280" height="144" rx="8"/>
       <text class="box-title-teal" x="20" y="30">Round 2</text>
       <text class="body" x="20" y="54">attach contained seed clusters</text>
-      <text class="small" x="20" y="75">score2 + strand-aware 3p tolerance</text>
+      <text class="small" x="20" y="75">overlap/longer + strand-aware 3p tolerance</text>
       <g transform="translate(32 102)">
         <path class="read-teal" d="M0 0h146"/>
         <path class="read-orange" d="M36 22h88"/>
@@ -170,37 +170,52 @@
   </g>
 
   <g id="panel-c" transform="translate(80 700)">
-    <rect class="panel" x="0" y="0" width="1440" height="174" rx="12"/>
+    <rect class="panel" x="0" y="0" width="1440" height="230" rx="12"/>
     <text class="panel-label" x="24" y="40">C</text>
     <text class="panel-title" x="58" y="40">Optional missed-TU rescue</text>
-    <text class="small" x="58" y="63">Separate post-clustering pass; original clustering outputs are not modified in place.</text>
+    <text class="small" x="58" y="63">Diagnose and rescue are independent post-clustering commands; rescue reruns detection and does not consume the diagnostic report.</text>
 
-    <g transform="translate(260 72)">
-      <rect class="box-orange" x="0" y="0" width="190" height="70" rx="8"/>
+    <g transform="translate(80 86)">
+      <rect class="box-orange" x="0" y="0" width="240" height="112" rx="8"/>
       <text class="box-title-orange" x="18" y="28">Cluster outputs</text>
-      <text class="small" x="18" y="50">pooled BED + TU BED</text>
+      <text class="small" x="18" y="53">pooled BED6 reads</text>
+      <text class="small" x="18" y="75">existing TU BED</text>
+      <text class="small" x="18" y="97">membership TSV (rescue)</text>
     </g>
-    <path class="arrow-orange" d="M462 107H542"/>
-    <g transform="translate(554 72)">
-      <rect class="box-orange" x="0" y="0" width="220" height="70" rx="8"/>
+    <path class="arrow-orange" d="M332 112H418"/>
+    <g transform="translate(430 78)">
+      <rect class="box-orange" x="0" y="0" width="220" height="62" rx="8"/>
       <text class="box-title-orange" x="18" y="28">Diagnose</text>
-      <text class="small" x="18" y="50">3p families, 5p modes, support</text>
+      <text class="small" x="18" y="50">detect boundary modes</text>
     </g>
-    <path class="arrow-orange" d="M786 107H866"/>
-    <g transform="translate(878 72)">
-      <rect class="box-orange" x="0" y="0" width="220" height="70" rx="8"/>
+    <path class="arrow-orange" d="M662 109H758"/>
+    <g transform="translate(770 78)">
+      <rect class="box" x="0" y="0" width="230" height="62" rx="8"/>
+      <text class="box-title" x="18" y="28">Diagnostic report</text>
+      <text class="small" x="18" y="50">MISS candidates (review only)</text>
+    </g>
+
+    <path class="arrow-orange" d="M332 181H418"/>
+    <g transform="translate(430 150)">
+      <rect class="box-orange" x="0" y="0" width="220" height="62" rx="8"/>
       <text class="box-title-orange" x="18" y="28">Rescue</text>
-      <text class="small" x="18" y="50">deduplicate and reassign reads</text>
+      <text class="small" x="18" y="50">redetect, deduplicate, compete</text>
     </g>
-    <path class="arrow-orange" d="M1110 107H1190"/>
-    <g transform="translate(1202 72)">
-      <rect class="box-orange" x="0" y="0" width="170" height="70" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Recount</text>
-      <text class="small" x="18" y="50">rescued TU matrices</text>
+    <path class="arrow-orange" d="M662 181H758"/>
+    <g transform="translate(770 150)">
+      <rect class="box-orange" x="0" y="0" width="230" height="62" rx="8"/>
+      <text class="box-title-orange" x="18" y="28">Rescued outputs</text>
+      <text class="small" x="18" y="50">TU BED + membership TSV</text>
+    </g>
+    <path class="arrow-orange" d="M1012 181H1138"/>
+    <g transform="translate(1150 150)">
+      <rect class="box-orange" x="0" y="0" width="190" height="62" rx="8"/>
+      <text class="box-title-orange" x="18" y="28">Optional recount</text>
+      <text class="small" x="18" y="50">membership to matrices</text>
     </g>
   </g>
 
-  <g transform="translate(80 910)">
+  <g transform="translate(80 970)">
     <text class="small" x="0" y="0">Intervals use 0-based, half-open coordinates. BED12 inputs are clustered by outer transcript span only.</text>
   </g>
 </svg>

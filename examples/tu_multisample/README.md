@@ -6,7 +6,9 @@ Inputs:
 - `sampleA.bed`
 - `sampleB.bed`
 
-Expected outputs are under `expected/`.
+Expected outputs are under `expected/`. They reflect the current defaults: stable
+coordinate-derived TU IDs, canonical v2 membership rows, explicit count semantics
+in `tu_count.csv`, and count-semantics columns in the sample/group matrices.
 
 Run:
 

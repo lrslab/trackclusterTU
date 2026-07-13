@@ -1,3 +1,5 @@
+//! Stable coordinate sorting for transcripts.
+
 use crate::model::{Strand, Transcript};
 
 fn strand_rank(strand: Strand) -> u8 {
@@ -8,13 +10,19 @@ fn strand_rank(strand: Strand) -> u8 {
     }
 }
 
+/// Stably sort transcripts by reference, start, end, and strand.
+///
+/// Strand ties are ordered plus, minus, then unknown. Records equal on all four
+/// keys retain their input order, so identifiers and other metadata do not
+/// silently affect coordinate algorithms. The ordering satisfies the input
+/// requirement of [`super::cluster_by_span`] and [`super::sweep_intersect_pairs`].
 pub fn sort_by_coord(transcripts: &mut [Transcript]) {
     transcripts.sort_by(|left, right| {
-        left.chrom
-            .cmp(&right.chrom)
-            .then_with(|| left.tx_start.cmp(&right.tx_start))
-            .then_with(|| left.tx_end.cmp(&right.tx_end))
-            .then_with(|| strand_rank(left.strand).cmp(&strand_rank(right.strand)))
+        left.chrom()
+            .cmp(right.chrom())
+            .then_with(|| left.tx_start().cmp(&right.tx_start()))
+            .then_with(|| left.tx_end().cmp(&right.tx_end()))
+            .then_with(|| strand_rank(left.strand()).cmp(&strand_rank(right.strand())))
     });
 }
 
@@ -50,7 +58,7 @@ mod tests {
 
         let mut transcripts = vec![a.clone(), b.clone()];
         sort_by_coord(&mut transcripts);
-        assert_eq!(transcripts[0].name, "a");
-        assert_eq!(transcripts[1].name, "b");
+        assert_eq!(transcripts[0].name(), "a");
+        assert_eq!(transcripts[1].name(), "b");
     }
 }

@@ -1,6 +1,6 @@
-tu_id	sample	count
-TU000001	sampleA	2
-TU000002	sampleB	1
-TU000003	sampleA	1
-TU000003	sampleB	1
-TU000004	sampleB	1
+tu_id	sample	unique_count	full_length_evidence_count	total_count	fractional_count
+TUg_63687231_100_200_p	sampleA	2	0	2	2
+TUg_63687231_120_180_p	sampleB	1	0	1	1
+TUg_63687231_300_400_p	sampleA	1	0	1	1
+TUg_63687231_300_400_p	sampleB	1	0	1	1
+TUg_63687231_500_600_p	sampleB	1	0	1	1

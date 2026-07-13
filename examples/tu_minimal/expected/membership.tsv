@@ -1,7 +1,15 @@
-r1	TU000001	1.000000	1.000000
-r2	TU000001	0.980198	0.990000
-r3	TU000002	1.000000	1.000000
-r4	TU000003	1.000000	1.000000
-r5	TU000003	0.980198	0.990000
-r6	TU000004	1.000000	1.000000
-r7	TU000005	1.000000	1.000000
+#trackclustertu_membership_schema=v2
+#columns=read_id	tu_id	score1	score2	schema_version	assignment_status	best_candidate_tu_id	second_candidate_tu_id	second_score1	second_score2	best_five_prime_delta_bp	best_three_prime_delta_bp	second_five_prime_delta_bp	second_three_prime_delta_bp	best_assignment_score	second_assignment_score	score_margin	primary_weight	fractional_assignments	full_length_evidence
+#legacy_score_columns=score1:span_jaccard,score2:overlap_over_longer
+#assignment_score=overlap_over_longer
+#ambiguity_rule=best_assignment_score-second_assignment_score<=ambiguity_margin
+#ambiguity_margin=0.02
+#fractional_assignment=false
+#lexical_tu_ids_are_ordering_only=true
+r1	TUg_63687231_100_200_p	1.000000	1.000000	v2	unique	TUg_63687231_100_200_p	.	.	.	0	0	.	.	1.000000	.	.	1	TUg_63687231_100_200_p:1	false
+r2	TUg_63687231_100_200_p	0.980198	0.990000	v2	unique	TUg_63687231_100_200_p	.	.	.	1	1	.	.	0.990000	.	.	1	TUg_63687231_100_200_p:1	false
+r3	TUg_63687231_120_180_p	1.000000	1.000000	v2	unique	TUg_63687231_120_180_p	.	.	.	0	0	.	.	1.000000	.	.	1	TUg_63687231_120_180_p:1	false
+r4	TUg_63687231_300_400_p	1.000000	1.000000	v2	unique	TUg_63687231_300_400_p	.	.	.	0	0	.	.	1.000000	.	.	1	TUg_63687231_300_400_p:1	false
+r5	TUg_63687231_300_400_p	0.980198	0.990000	v2	unique	TUg_63687231_300_400_p	.	.	.	1	1	.	.	0.990000	.	.	1	TUg_63687231_300_400_p:1	false
+r6	TUg_63687231_320_360_p	1.000000	1.000000	v2	unique	TUg_63687231_320_360_p	.	.	.	0	0	.	.	1.000000	.	.	1	TUg_63687231_320_360_p:1	false
+r7	TUg_63687231_100_200_m	1.000000	1.000000	v2	unique	TUg_63687231_100_200_m	.	.	.	0	0	.	.	1.000000	.	.	1	TUg_63687231_100_200_m:1	false

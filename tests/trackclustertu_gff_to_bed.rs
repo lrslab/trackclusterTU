@@ -16,7 +16,7 @@ fn trackclustertu_gff_to_bed_subcommand_converts_gene_features() {
     fs::create_dir_all(&tmp).unwrap();
 
     let gff_path = tmp.join("genes.gff3");
-    let out_bed = tmp.join("genes.bed");
+    let out_bed = tmp.join("nested/annotation/genes.bed");
 
     fs::write(
         &gff_path,
@@ -59,4 +59,36 @@ fn trackclustertu_gff_to_bed_subcommand_converts_gene_features() {
     );
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn trackclustertu_gff_to_bed_rejects_output_aliasing_input_without_truncation() {
+    let tmp = unique_tmp_dir("trackclustertu_gff_alias_test");
+    fs::create_dir_all(&tmp).unwrap();
+    let gff_path = tmp.join("genes.gff3");
+    let original = concat!(
+        "##gff-version 3\n",
+        "chr1\tTest\tgene\t11\t50\t.\t+\t.\tID=id1;Name=geneA\n",
+    );
+    fs::write(&gff_path, original).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_trackclustertu"))
+        .args([
+            "gff-to-bed",
+            "--annotation-gff",
+            gff_path.to_str().unwrap(),
+            "--out-bed",
+            gff_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("aliases input"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&gff_path).unwrap(), original);
+    let _ = fs::remove_dir_all(tmp);
 }

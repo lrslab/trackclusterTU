@@ -1,45 +1,17 @@
-# pycharm
-.idea
-.idea/*
+# IDE
+/.idea/
 
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Unfinished root-level notes
+/todo*
 
 # Rust
 /target/
+
+# Default CLI output directories
+*.trackclustertu/
+
+# Local manuscript, validation, and external-comparison workspace
+/mauscript/
 
 # MacOS specific
 .DS_Store

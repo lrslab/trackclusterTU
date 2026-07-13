@@ -1,15 +1,26 @@
+//! Reference and optional-strand partitioning.
+
 use std::collections::HashMap;
 
 use crate::model::Transcript;
 
 use super::StrandMode;
 
+/// Key identifying a reference sequence and optional strand.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PartitionKey {
+    /// Reference sequence name.
     pub chrom: String,
+    /// Strand when strand matching is enabled, otherwise `None`.
     pub strand: Option<crate::model::Strand>,
 }
 
+/// Partition transcript indices by reference and configured strand semantics.
+///
+/// Values preserve input order and contain indices into `transcripts`.
+/// [`StrandMode::Ignore`] stores `None` in every key; [`StrandMode::Match`]
+/// stores each transcript's strand. The returned [`HashMap`] does not guarantee
+/// key iteration order.
 pub fn partition(
     transcripts: &[Transcript],
     strand_mode: StrandMode,
@@ -17,8 +28,8 @@ pub fn partition(
     let mut parts: HashMap<PartitionKey, Vec<usize>> = HashMap::new();
     for (index, transcript) in transcripts.iter().enumerate() {
         let key = PartitionKey {
-            chrom: transcript.chrom.clone(),
-            strand: strand_mode.key_strand(transcript.strand),
+            chrom: transcript.chrom().to_owned(),
+            strand: strand_mode.key_strand(transcript.strand()),
         };
         parts.entry(key).or_default().push(index);
     }

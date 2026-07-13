@@ -1,9 +1,17 @@
+//! Deterministic transcript representative selection.
+
 use crate::model::Transcript;
 
 fn span_len(tx: &Transcript) -> u32 {
-    tx.tx_end.get() - tx.tx_start.get()
+    tx.tx_end().get() - tx.tx_start().get()
 }
 
+/// Return whether `candidate` should replace `current` as representative.
+///
+/// Longer genomic spans win; equal spans are ordered by ascending transcript
+/// name. Reference sequence, strand, exon structure, score, and input position
+/// do not participate, so callers should compare only biologically compatible
+/// candidates.
 pub fn better_representative(candidate: &Transcript, current: &Transcript) -> bool {
     let candidate_len = span_len(candidate);
     let current_len = span_len(current);
@@ -12,7 +20,7 @@ pub fn better_representative(candidate: &Transcript, current: &Transcript) -> bo
         return candidate_len > current_len;
     }
 
-    candidate.name < current.name
+    candidate.name() < current.name()
 }
 
 #[cfg(test)]

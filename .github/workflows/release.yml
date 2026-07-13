@@ -6,11 +6,43 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Verify release tag matches Cargo version
+        shell: bash
+        run: |
+          package_id="$(cargo pkgid --locked)"
+          version="${package_id##*@}"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-targets --all-features
+      - name: Build documentation with warnings denied
+        run: RUSTDOCFLAGS="-D warnings -D missing_docs" cargo doc --locked --no-deps --all-features
+      - run: cargo test --locked --doc --all-features
+      - run: rustup toolchain install 1.88.0 --profile minimal
+      - run: cargo +1.88.0 test --locked --lib
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+      - run: cargo audit --deny warnings
+      - name: Verify Cargo source package
+        run: cargo package --locked
+
   build:
     name: Build ${{ matrix.target }}
+    needs: gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -18,54 +50,86 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            use_cross: true
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            use_cross: false
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
+            use_cross: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Install cross
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo install cross --locked
+        if: matrix.use_cross
+        run: cargo install cross --locked --version 0.2.5
 
       - name: Build release binary
+        env:
+          TRACKCLUSTERTU_GIT_REVISION: ${{ github.sha }}
+          TRACKCLUSTERTU_GIT_DIRTY: "false"
         run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            cross build --release --target "${{ matrix.target }}" --bin trackclustertu
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --locked --target "${{ matrix.target }}" --bin trackclustertu
           else
-            cargo build --release --target "${{ matrix.target }}" --bin trackclustertu
+            cargo build --release --locked --target "${{ matrix.target }}" --bin trackclustertu
           fi
+
+      - name: Smoke-test release binary
+        run: |
+          expected="trackclustertu ${GITHUB_REF_NAME#v}"
+          binary="target/${{ matrix.target }}/release/trackclustertu"
+          actual="$("$binary" --version)"
+          "$binary" --help >/dev/null
+          test "$actual" = "$expected"
+          grep -aF "${GITHUB_SHA}" "$binary" >/dev/null
 
       - name: Package release artifact
         run: |
           archive="trackclustertu-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
-          tar -C "target/${{ matrix.target }}/release" -czf "$archive" trackclustertu
+          staging="$RUNNER_TEMP/trackclustertu-${{ matrix.target }}"
+          mkdir -p "$staging"
+          cp "target/${{ matrix.target }}/release/trackclustertu" LICENSE README.md "$staging/"
+          tar -C "$staging" -czf "$archive" trackclustertu LICENSE README.md
+          test "$(tar -tzf "$archive" | sort)" = "$(printf '%s\n' LICENSE README.md trackclustertu | sort)"
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: trackclustertu-${{ matrix.target }}
+          name: trackclustertu-${{ github.ref_name }}-${{ matrix.target }}
+          if-no-files-found: error
           path: ${{ env.ARCHIVE }}
 
   release:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
+      - name: Generate release checksum manifest
+        run: |
+          test "$(find . -maxdepth 1 -type f -name 'trackclustertu-*.tar.gz' | wc -l | tr -d ' ')" = 3
+          sha256sum trackclustertu-*.tar.gz > SHA256SUMS
+          test "$(wc -l < SHA256SUMS | tr -d ' ')" = 3
+          sha256sum --check SHA256SUMS
+
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          files: trackclustertu-*.tar.gz
+          fail_on_unmatched_files: true
+          files: |
+            trackclustertu-*.tar.gz
+            SHA256SUMS

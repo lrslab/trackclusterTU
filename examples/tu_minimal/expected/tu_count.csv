@@ -1,6 +1,6 @@
-tu_id,count
-TU000001,2
-TU000002,1
-TU000003,2
-TU000004,1
-TU000005,1
+tu_id,count,unique_count,full_length_evidence_count,total_count,fractional_count
+TUg_63687231_100_200_p,2,2,0,2,2
+TUg_63687231_120_180_p,1,1,0,1,1
+TUg_63687231_300_400_p,2,2,0,2,2
+TUg_63687231_320_360_p,1,1,0,1,1
+TUg_63687231_100_200_m,1,1,0,1,1

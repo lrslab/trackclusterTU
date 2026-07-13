@@ -1,3 +1,3 @@
 fn main() -> anyhow::Result<()> {
-    trackcluster_rs::tools::trackclustertu::entrypoint()
+    trackclustertu::cli_entrypoint()
 }

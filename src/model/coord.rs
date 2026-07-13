@@ -1,13 +1,18 @@
+//! Unsigned genomic coordinate values.
+
 use std::fmt;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// A zero-based genomic coordinate.
 pub struct Coord(u32);
 
 impl Coord {
+    /// Construct a coordinate from its raw unsigned value.
     pub const fn new(value: u32) -> Self {
         Self(value)
     }
 
+    /// Return the raw unsigned coordinate value.
     pub const fn get(self) -> u32 {
         self.0
     }

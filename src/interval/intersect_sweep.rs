@@ -1,3 +1,5 @@
+//! Sweep-line intersection of coordinate-sorted transcript collections.
+
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 
@@ -5,17 +7,24 @@ use crate::model::{Interval, Transcript};
 
 use super::{partition, StrandMode};
 
+/// Filtering options for transcript intersection pairs.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IntersectOpts {
+    /// Whether opposite strands may be paired.
+    ///
+    /// [`StrandMode::Ignore`] compares both strands within a reference sequence;
+    /// [`StrandMode::Match`] requires equal strand values.
     pub strand_mode: StrandMode,
+    /// Optional minimum genomic span overlap in base pairs, inclusive.
+    ///
+    /// `None` accepts every positive overlap. Because spans are half-open,
+    /// merely touching records never form a pair.
     pub min_overlap_bp: Option<u32>,
 }
 
 fn span(transcript: &Transcript) -> Interval {
-    Interval {
-        start: transcript.tx_start,
-        end: transcript.tx_end,
-    }
+    Interval::new(transcript.tx_start(), transcript.tx_end())
+        .expect("validated transcript span has ordered bounds")
 }
 
 fn span_overlap_len(a: &Transcript, b: &Transcript) -> u32 {
@@ -67,11 +76,11 @@ fn sweep_partition_pairs(
     loop {
         let next_a_start = a_indices
             .get(ai)
-            .map(|&idx| a[idx].tx_start.get())
+            .map(|&idx| a[idx].tx_start().get())
             .unwrap_or(u32::MAX);
         let next_b_start = b_indices
             .get(bi)
-            .map(|&idx| b[idx].tx_start.get())
+            .map(|&idx| b[idx].tx_start().get())
             .unwrap_or(u32::MAX);
 
         if next_a_start == u32::MAX && next_b_start == u32::MAX {
@@ -86,15 +95,15 @@ fn sweep_partition_pairs(
             let a_idx = a_indices[ai];
             ai += 1;
             let a_tx = &a[a_idx];
-            if a_tx.tx_start == a_tx.tx_end {
+            if a_tx.tx_start() == a_tx.tx_end() {
                 continue;
             }
 
-            add_active(a_tx.tx_end.get(), a_idx, &mut active_a, &mut a_ends);
+            add_active(a_tx.tx_end().get(), a_idx, &mut active_a, &mut a_ends);
             for &b_idx in &active_b {
                 let b_tx = &b[b_idx];
 
-                if opts.strand_mode == StrandMode::Match && a_tx.strand != b_tx.strand {
+                if opts.strand_mode == StrandMode::Match && a_tx.strand() != b_tx.strand() {
                     continue;
                 }
 
@@ -110,15 +119,15 @@ fn sweep_partition_pairs(
             let b_idx = b_indices[bi];
             bi += 1;
             let b_tx = &b[b_idx];
-            if b_tx.tx_start == b_tx.tx_end {
+            if b_tx.tx_start() == b_tx.tx_end() {
                 continue;
             }
 
-            add_active(b_tx.tx_end.get(), b_idx, &mut active_b, &mut b_ends);
+            add_active(b_tx.tx_end().get(), b_idx, &mut active_b, &mut b_ends);
             for &a_idx in &active_a {
                 let a_tx = &a[a_idx];
 
-                if opts.strand_mode == StrandMode::Match && a_tx.strand != b_tx.strand {
+                if opts.strand_mode == StrandMode::Match && a_tx.strand() != b_tx.strand() {
                     continue;
                 }
 
@@ -134,10 +143,13 @@ fn sweep_partition_pairs(
     }
 }
 
-/// Returns all `(a_index, b_index)` pairs whose transcript spans overlap (half-open).
+/// Return index pairs whose half-open transcript spans overlap under `opts`.
 ///
-/// Requirements:
-/// - Inputs must be sorted by `(chrom, start, end, strand)` for linear-time per partition.
+/// Both inputs must first be ordered with [`super::sort_by_coord`]. Returned
+/// indices refer to those input slices, and the final pair list is sorted
+/// lexicographically. Reference sequences are always matched; strand behavior
+/// and the optional minimum overlap are controlled by [`IntersectOpts`].
+/// Zero-length transcript spans and merely touching spans are excluded.
 pub fn sweep_intersect_pairs(
     a: &[Transcript],
     b: &[Transcript],
@@ -193,10 +205,10 @@ mod tests {
         let mut out = Vec::new();
         for (ai, atx) in a.iter().enumerate() {
             for (bi, btx) in b.iter().enumerate() {
-                if atx.chrom != btx.chrom {
+                if atx.chrom() != btx.chrom() {
                     continue;
                 }
-                if opts.strand_mode == StrandMode::Match && atx.strand != btx.strand {
+                if opts.strand_mode == StrandMode::Match && atx.strand() != btx.strand() {
                     continue;
                 }
                 let overlap = span_overlap_len(atx, btx);
@@ -297,11 +309,11 @@ mod tests {
             a_specs in prop::collection::vec((prop_oneof![Just("chr1".to_owned()), Just("chr2".to_owned())],
                                               prop_oneof![Just(Strand::Plus), Just(Strand::Minus), Just(Strand::Unknown)],
                                               0u32..200,
-                                              0u32..50), 0..12),
+                                              1u32..50), 0..12),
             b_specs in prop::collection::vec((prop_oneof![Just("chr1".to_owned()), Just("chr2".to_owned())],
                                               prop_oneof![Just(Strand::Plus), Just(Strand::Minus), Just(Strand::Unknown)],
                                               0u32..200,
-                                              0u32..50), 0..12),
+                                              1u32..50), 0..12),
             strand_mode in prop_oneof![Just(StrandMode::Ignore), Just(StrandMode::Match)],
             min_overlap_bp in prop_oneof![Just(None), (1u32..25).prop_map(Some)],
         ) {
