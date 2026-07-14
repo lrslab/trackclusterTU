@@ -59,8 +59,8 @@ If you want to keep only the span-Jaccard seed clusters as the final TUs, pass `
 Prebuilt release tarballs are published from GitHub Actions on tagged releases:
 
 - Releases: [lrslab/trackclusterTU/releases](https://github.com/lrslab/trackclusterTU/releases)
-- Release tag for this version: `v0.2.0`
-- Archive naming: `trackclustertu-v0.2.0-<target>.tar.gz`
+- Release tag for this version: `v0.2.1`
+- Archive naming: `trackclustertu-v0.2.1-<target>.tar.gz`
 - Optional checksum manifest: `SHA256SUMS`
 
 Each archive contains the `trackclustertu` executable, `LICENSE`, and `README.md`.
@@ -150,7 +150,7 @@ With `--annotation-bed`, gene relationships require at least one overlapping bas
 - `intergenic`: no gene on either strand passes it; and
 - `probable_processing_product`: the TU is strictly contained in a longer TU with the same non-empty context and both boundaries are internal.
 
-Labels are emitted in that fixed order and may coexist; a TU with none is `canonical`. `tus.gff3` contains 1-based GFF3 transcript features and child `gene_overlap` relationships. TU IDs are coordinate-derived by default (`TUg_<hex-contig>_<start>_<end>_<p|m>`), so filtering another TU does not renumber them. Use `--tu-id-style sequential` for the historical serial IDs; `tu_id_map.tsv` always makes emitted, stable, and sequential identities auditable.
+Labels are emitted in that fixed order and may coexist; a TU with none is `canonical`. `tus.gff3` contains 1-based GFF3 transcript features and child `gene_overlap` relationships. TU IDs are coordinate-derived by default (`TUg_<hex-contig>_<start>_<end>_<p|m>`), so filtering another TU does not renumber them. Coordinate-identical final consensus families are coalesced before IDs are assigned, making these stable IDs unique within a run. Use `--tu-id-style sequential` for the historical serial IDs; `tu_id_map.tsv` always makes emitted, stable, and sequential identities auditable.
 
 Gene counts are deliberately nonexclusive: one polycistronic/readthrough TU contributes its complete assignment weight to every qualifying same-strand gene. Consequently, summed gene counts can exceed read and TU totals. Antisense relationships are reported but are not added to gene counts; each gene count file/matrix carries this policy in `#count_semantics` metadata.
 
@@ -435,6 +435,11 @@ printed to stderr. Use `--out-read-rejections` to override the report path or
 `--strict-read-errors` when a quality-control workflow should fail if any read
 is rejected. File/manifest structure and I/O errors, output failures, and
 internal consistency failures remain fatal.
+
+For non-empty inputs, clustering and read assignment report structured
+`pipeline_stage` start/completion lines to stderr, including the read/TU counts
+and completed-stage elapsed time. These phase boundaries remain visible without
+`--timings`; use `--timings` for the full end-of-run timing breakdown.
 
 ```bash
 trackclustertu recount \

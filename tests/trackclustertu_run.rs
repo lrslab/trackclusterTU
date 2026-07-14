@@ -183,6 +183,9 @@ esac
             "chr1\tTest\tgene\t91\t150\t.\t+\t.\tID=id1;Name=geneA\n",
             "chr1\tTest\tgene\t161\t220\t.\t+\t.\tID=id2;Name=geneB\n",
             "chr1\tTest\tgene\t291\t310\t.\t+\t.\tID=id3;Name=geneC\n",
+            "##FASTA\n",
+            ">chr1\n",
+            "ACGTACGTACGTACGT\n",
         ),
     )
     .unwrap();

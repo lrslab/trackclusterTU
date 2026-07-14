@@ -1,5 +1,6 @@
 //! Transaction-safe output records and versioned schema writers.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -281,7 +282,7 @@ pub(super) fn prepare_outputs(
     result: &TuClusteringResult,
     min_tu_count: Option<u64>,
     id_style: TuIdStyle,
-) -> PreparedOutputs {
+) -> anyhow::Result<PreparedOutputs> {
     let mut tu_counts: Vec<u64> = vec![0; result.tus().len()];
     for &tu_idx in result.read_to_tu() {
         tu_counts[tu_idx] += 1;
@@ -298,6 +299,7 @@ pub(super) fn prepare_outputs(
     let mut tus: Vec<Tu> = Vec::with_capacity(kept_old_tu_indices.len());
     let mut endpoint_stats: Vec<TuEndpointStats> = Vec::with_capacity(kept_old_tu_indices.len());
     let mut id_mappings: Vec<TuIdMapping> = Vec::with_capacity(kept_old_tu_indices.len());
+    let mut stable_ids = HashSet::with_capacity(kept_old_tu_indices.len());
 
     for (new_idx, &old_idx) in kept_old_tu_indices.iter().enumerate() {
         let tu = &result.tus()[old_idx];
@@ -310,6 +312,11 @@ pub(super) fn prepare_outputs(
             rep_read_index: tu.rep_read_index,
         };
         let stable_tu_id = stable_tu_id(&emitted_tu);
+        if !stable_ids.insert(stable_tu_id.clone()) {
+            anyhow::bail!(
+                "duplicate stable TU identifier {stable_tu_id:?}; coordinate-identical consensus families must be coalesced before output"
+            );
+        }
         emitted_tu.id = match id_style {
             TuIdStyle::Stable => stable_tu_id.clone(),
             TuIdStyle::Sequential => sequential_tu_id.clone(),
@@ -326,9 +333,9 @@ pub(super) fn prepare_outputs(
         endpoint_stats.push(result.endpoint_stats()[old_idx]);
     }
 
-    PreparedOutputs {
+    Ok(PreparedOutputs {
         tus,
         endpoint_stats,
         id_mappings,
-    }
+    })
 }

@@ -126,6 +126,45 @@ fn cluster_skips_unknown_strand_records_it_and_continues() {
         "stderr:\n{stderr}"
     );
     assert!(stderr.contains("unknown_strand=1"), "stderr:\n{stderr}");
+    let clustering_started = stderr
+        .find("pipeline_stage\tstage=clustering\tstatus=started")
+        .expect("clustering start should be reported");
+    let clustering_completed = stderr
+        .find("pipeline_stage\tstage=clustering\tstatus=completed")
+        .expect("clustering completion should be reported");
+    let assignment_started = stderr
+        .find("pipeline_stage\tstage=assignment\tstatus=started")
+        .expect("assignment start should be reported");
+    let assignment_completed = stderr
+        .find("pipeline_stage\tstage=assignment\tstatus=completed")
+        .expect("assignment completion should be reported");
+    assert!(
+        clustering_started < clustering_completed
+            && clustering_completed < assignment_started
+            && assignment_started < assignment_completed,
+        "pipeline stages were reported out of order:\n{stderr}"
+    );
+    let stage_lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("pipeline_stage\t"))
+        .collect();
+    assert_eq!(stage_lines.len(), 4, "stderr:\n{stderr}");
+    assert!(
+        stage_lines[0].contains("\treads=2\tthreads="),
+        "stderr:\n{stderr}"
+    );
+    assert!(
+        stage_lines[1].contains("\treads=2\ttus=2\telapsed_seconds="),
+        "stderr:\n{stderr}"
+    );
+    assert!(
+        stage_lines[2].ends_with("\treads=2\ttus=2"),
+        "stderr:\n{stderr}"
+    );
+    assert!(
+        stage_lines[3].contains("\treads=2\ttus=2\telapsed_seconds="),
+        "stderr:\n{stderr}"
+    );
 
     let membership = fs::read_to_string(out_dir.join("membership.tsv")).unwrap();
     assert!(membership.contains("good_before"), "{membership}");

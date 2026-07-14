@@ -26,6 +26,11 @@ fn trackclustertu_gff_to_bed_subcommand_converts_gene_features() {
             "chr1\tTest\tCDS\t11\t50\t.\t+\t0\tParent=id1\n",
             "chr1\tTest\tgene\t61\t100\t.\t-\t.\tID=id2;locus_tag=b0002\n",
             "chr2\tTest\tgene\t5\t20\t.\t+\t.\tID=id3\n",
+            "##FASTA\n",
+            ">chr1\n",
+            "ACGTACGTACGT\n",
+            ">chr2\n",
+            "TGCATGCATGCA\n",
         ),
     )
     .unwrap();

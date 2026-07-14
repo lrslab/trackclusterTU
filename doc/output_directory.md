@@ -15,6 +15,7 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 - `*.tus.bed` (BED6): one line per TU interval
   - columns: `chrom  start  end  tu_id  0  strand`
   - default IDs encode contig bytes, coordinates, and strand, so filtering another TU does not renumber this call
+  - coordinate-identical final consensus families are coalesced before output, and stable-ID uniqueness is enforced
 - `*.tu_id_map.tsv`: emitted, stable, and sequential compatibility IDs with genomic identity
   - pass `--tu-id-style sequential` only when an older downstream workflow requires serial `TU000001` names
 - `*.membership.tsv` (TSV): one line per read assignment

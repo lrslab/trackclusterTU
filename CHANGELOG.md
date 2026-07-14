@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows SemVer.
 
+## [Unreleased]
+
+## [0.2.1] - 2026-07-14
+
+### Changed
+
+- Clustering now maintains endpoint consensus incrementally and read assignment
+  uses per-reference, per-strand interval indexes. Dense direct-RNA loci scale
+  near-linearly instead of repeatedly rebuilding growing families or comparing
+  every read with every emitted TU.
+- Non-empty clustering runs report structured clustering and assignment phase
+  boundaries, counts, and completed-stage elapsed times even without
+  `--timings`.
+
+### Fixed
+
+- Coordinate-identical final consensus families are coalesced before assignment
+  and output, preventing duplicate stable TU IDs and artificial exact-tie
+  ambiguity. Stable-ID uniqueness is also enforced before files are published.
+- GFF3 annotation parsing now stops at the standard `##FASTA` directive, so
+  Prokka files with embedded reference sequences are accepted while feature
+  rows before the FASTA section remain strictly validated.
+
 ## [0.2.0] - 2026-07-13
 
 This release changes TU boundary inference, assignment semantics, identifiers,
@@ -156,6 +179,8 @@ changes before adopting these outputs.
 - `trackclustertu` CLI for clustering BED6/BED12/TSV inputs into TU BED6 + membership TSV.
 - Criterion benchmarks (`cargo bench`) and a baseline performance note in `doc/performance.md`.
 
+[Unreleased]: https://github.com/lrslab/trackclusterTU/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lrslab/trackclusterTU/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lrslab/trackclusterTU/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/lrslab/trackclusterTU/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/lrslab/trackclusterTU/compare/v0.1.2...v0.1.3

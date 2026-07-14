@@ -3,7 +3,7 @@
 pub(crate) mod multi;
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 
 use rayon::prelude::*;
 use thiserror::Error;
@@ -655,6 +655,178 @@ fn interval_satisfies_consensus(
     })
 }
 
+/// An interval tree over the TUs in one reference/strand partition.
+///
+/// Assignment used to compare every read with every emitted TU. At direct-RNA
+/// scale that made the post-clustering pass quadratic even though almost all
+/// pairs are on different loci. Nodes keep the intervals crossing a median
+/// start coordinate in two orders, allowing a query to visit only spatially
+/// overlapping TUs (plus the logarithmic search path).
+#[derive(Debug)]
+struct TuIntervalIndexNode {
+    center: u32,
+    crossing_by_start: Vec<usize>,
+    crossing_by_end: Vec<usize>,
+    left: Option<Box<Self>>,
+    right: Option<Box<Self>>,
+}
+
+impl TuIntervalIndexNode {
+    /// Build from indices already ordered by interval start/end and original index.
+    fn build_sorted(tu_indices: Vec<usize>, tus: &[Tu]) -> Option<Box<Self>> {
+        if tu_indices.is_empty() {
+            return None;
+        }
+
+        // A median start keeps both recursive sides balanced. Empty intervals
+        // are omitted by TuIntervalIndex::build, so the interval supplying the
+        // median always crosses its own start and recursion must make progress.
+        let center = tus[tu_indices[tu_indices.len() / 2]].interval.start().get();
+
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut crossing_by_start = Vec::new();
+        for tu_index in tu_indices {
+            let interval = tus[tu_index].interval;
+            if interval.end().get() <= center {
+                left.push(tu_index);
+            } else if interval.start().get() > center {
+                right.push(tu_index);
+            } else {
+                crossing_by_start.push(tu_index);
+            }
+        }
+
+        // Partitioning preserves the incoming start order.
+        let mut crossing_by_end = crossing_by_start.clone();
+        crossing_by_end.sort_unstable_by(|&a, &b| {
+            tus[b]
+                .interval
+                .end()
+                .cmp(&tus[a].interval.end())
+                .then_with(|| tus[a].interval.start().cmp(&tus[b].interval.start()))
+                .then_with(|| a.cmp(&b))
+        });
+
+        Some(Box::new(Self {
+            center,
+            crossing_by_start,
+            crossing_by_end,
+            left: Self::build_sorted(left, tus),
+            right: Self::build_sorted(right, tus),
+        }))
+    }
+
+    fn for_each_overlap<F>(&self, query: Interval, tus: &[Tu], visit: &mut F)
+    where
+        F: FnMut(usize),
+    {
+        let query_start = query.start().get();
+        let query_end = query.end().get();
+
+        if query_end <= self.center {
+            // Every centered interval ends beyond `center`; start is the only
+            // remaining overlap condition for a query entirely to the left.
+            for &tu_index in &self.crossing_by_start {
+                if tus[tu_index].interval.start().get() >= query_end {
+                    break;
+                }
+                visit(tu_index);
+            }
+            if let Some(left) = self.left.as_deref() {
+                left.for_each_overlap(query, tus, visit);
+            }
+        } else if query_start > self.center {
+            // Symmetrically, centered starts are left of the query and only
+            // their end coordinates can exclude them.
+            for &tu_index in &self.crossing_by_end {
+                if tus[tu_index].interval.end().get() <= query_start {
+                    break;
+                }
+                visit(tu_index);
+            }
+            if let Some(right) = self.right.as_deref() {
+                right.for_each_overlap(query, tus, visit);
+            }
+        } else {
+            // The query contains the center, so every centered interval
+            // overlaps it. Either recursive side may contain more overlaps.
+            for &tu_index in &self.crossing_by_start {
+                visit(tu_index);
+            }
+            if let Some(left) = self.left.as_deref() {
+                left.for_each_overlap(query, tus, visit);
+            }
+            if let Some(right) = self.right.as_deref() {
+                right.for_each_overlap(query, tus, visit);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TuIntervalIndex {
+    root: Option<Box<TuIntervalIndexNode>>,
+}
+
+impl TuIntervalIndex {
+    fn build(tu_indices: Vec<usize>, tus: &[Tu]) -> Self {
+        // Empty TUs can never have positive overlap with a read. Removing them
+        // also guarantees progress when constructing the recursive tree.
+        let mut non_empty: Vec<usize> = tu_indices
+            .into_iter()
+            .filter(|&tu_index| !tus[tu_index].interval.is_empty())
+            .collect();
+        non_empty.sort_unstable_by(|&a, &b| {
+            tus[a]
+                .interval
+                .start()
+                .cmp(&tus[b].interval.start())
+                .then_with(|| tus[a].interval.end().cmp(&tus[b].interval.end()))
+                .then_with(|| a.cmp(&b))
+        });
+        Self {
+            root: TuIntervalIndexNode::build_sorted(non_empty, tus),
+        }
+    }
+
+    fn for_each_overlap<F>(&self, query: Interval, tus: &[Tu], mut visit: F)
+    where
+        F: FnMut(usize),
+    {
+        if query.is_empty() {
+            return;
+        }
+        if let Some(root) = self.root.as_deref() {
+            root.for_each_overlap(query, tus, &mut visit);
+        }
+    }
+}
+
+fn build_tu_interval_indices(tus: &[Tu]) -> HashMap<String, HashMap<Strand, TuIntervalIndex>> {
+    let mut partitions: HashMap<String, HashMap<Strand, Vec<usize>>> = HashMap::new();
+    for (tu_index, tu) in tus.iter().enumerate() {
+        if let Some(strands) = partitions.get_mut(tu.contig.as_str()) {
+            strands.entry(tu.strand).or_default().push(tu_index);
+        } else {
+            let mut strands = HashMap::new();
+            strands.insert(tu.strand, vec![tu_index]);
+            partitions.insert(tu.contig.clone(), strands);
+        }
+    }
+
+    partitions
+        .into_iter()
+        .map(|(contig, strands)| {
+            let indices = strands
+                .into_iter()
+                .map(|(strand, tu_indices)| (strand, TuIntervalIndex::build(tu_indices, tus)))
+                .collect();
+            (contig, indices)
+        })
+        .collect()
+}
+
 fn assignment_candidate(
     read: &ReadRecord,
     tu: &Tu,
@@ -747,6 +919,61 @@ fn exact_equal_weights(candidates: &[AssignmentCandidate]) -> Vec<FractionalAssi
     assignments
 }
 
+fn classify_assignment_candidates(
+    mut candidates: Vec<AssignmentCandidate>,
+    tus: &[Tu],
+    ambiguity_margin: f64,
+    fractional_assignment: bool,
+) -> ReadAssignment {
+    candidates.sort_by(|left, right| compare_assignment_candidates(left, right, tus));
+
+    let Some(best) = candidates.first().copied() else {
+        return ReadAssignment {
+            status: AssignmentStatus::Unassigned,
+            best: None,
+            second_best: None,
+            score_margin: None,
+            fractional_assignments: Vec::new(),
+        };
+    };
+    let second_best = candidates.get(1).copied();
+    let score_margin =
+        second_best.map(|runner_up| (best.assignment_score - runner_up.assignment_score).max(0.0));
+    let ambiguous = score_margin.is_some_and(|margin| margin <= ambiguity_margin);
+    let status = if ambiguous {
+        AssignmentStatus::Ambiguous
+    } else if best.partial {
+        AssignmentStatus::Partial
+    } else {
+        AssignmentStatus::Unique
+    };
+
+    let fractional_assignments = if ambiguous {
+        if fractional_assignment {
+            let candidates_in_margin: Vec<AssignmentCandidate> = candidates
+                .iter()
+                .copied()
+                .take_while(|candidate| {
+                    best.assignment_score - candidate.assignment_score <= ambiguity_margin
+                })
+                .collect();
+            exact_equal_weights(&candidates_in_margin)
+        } else {
+            Vec::new()
+        }
+    } else {
+        exact_equal_weights(&[best])
+    };
+
+    ReadAssignment {
+        status,
+        best: Some(best),
+        second_best,
+        score_margin,
+        fractional_assignments,
+    }
+}
+
 /// Classify every read against all emitted TU consensuses.
 ///
 /// A candidate qualifies directly when score1 reaches `score1_threshold`, or as a partial
@@ -782,6 +1009,8 @@ pub fn assign_reads_to_tus(
         });
     }
 
+    let tu_indices = build_tu_interval_indices(tus);
+
     reads
         .par_iter()
         .map(|read| {
@@ -791,69 +1020,342 @@ pub fn assign_reads_to_tus(
                 });
             }
 
-            let mut candidates: Vec<AssignmentCandidate> = tus
-                .iter()
-                .enumerate()
-                .filter_map(|(tu_index, tu)| {
-                    assignment_candidate(
+            let mut candidates: Vec<AssignmentCandidate> = Vec::new();
+            if let Some(index) = tu_indices
+                .get(read.contig.as_str())
+                .and_then(|strands| strands.get(&read.strand))
+            {
+                index.for_each_overlap(read.interval, tus, |tu_index| {
+                    if let Some(candidate) = assignment_candidate(
                         read,
-                        tu,
+                        &tus[tu_index],
                         tu_index,
                         score1_threshold,
                         score2_threshold,
                         options,
-                    )
-                })
-                .collect();
-            candidates.sort_by(|left, right| compare_assignment_candidates(left, right, tus));
-
-            let Some(best) = candidates.first().copied() else {
-                return Ok(ReadAssignment {
-                    status: AssignmentStatus::Unassigned,
-                    best: None,
-                    second_best: None,
-                    score_margin: None,
-                    fractional_assignments: Vec::new(),
+                    ) {
+                        candidates.push(candidate);
+                    }
                 });
-            };
-            let second_best = candidates.get(1).copied();
-            let score_margin = second_best
-                .map(|runner_up| (best.assignment_score - runner_up.assignment_score).max(0.0));
-            let ambiguous = score_margin.is_some_and(|margin| margin <= ambiguity_margin);
-            let status = if ambiguous {
-                AssignmentStatus::Ambiguous
-            } else if best.partial {
-                AssignmentStatus::Partial
-            } else {
-                AssignmentStatus::Unique
-            };
+            }
 
-            let fractional_assignments = if ambiguous {
-                if fractional_assignment {
-                    let candidates_in_margin: Vec<AssignmentCandidate> = candidates
-                        .iter()
-                        .copied()
-                        .take_while(|candidate| {
-                            best.assignment_score - candidate.assignment_score <= ambiguity_margin
-                        })
-                        .collect();
-                    exact_equal_weights(&candidates_in_margin)
-                } else {
-                    Vec::new()
-                }
-            } else {
-                exact_equal_weights(&[best])
-            };
-
-            Ok(ReadAssignment {
-                status,
-                best: Some(best),
-                second_best,
-                score_margin,
-                fractional_assignments,
-            })
+            Ok(classify_assignment_candidates(
+                candidates,
+                tus,
+                ambiguity_margin,
+                fractional_assignment,
+            ))
         })
         .collect()
+}
+
+#[derive(Clone, Debug, Default)]
+struct CoordinateMedian {
+    lower: BTreeMap<u32, usize>,
+    upper: BTreeMap<u32, usize>,
+    lower_len: usize,
+    upper_len: usize,
+    reverse: bool,
+}
+
+impl CoordinateMedian {
+    fn new(reverse: bool) -> Self {
+        Self {
+            reverse,
+            ..Self::default()
+        }
+    }
+
+    fn increment(map: &mut BTreeMap<u32, usize>, coordinate: u32) {
+        *map.entry(coordinate).or_default() += 1;
+    }
+
+    fn decrement(map: &mut BTreeMap<u32, usize>, coordinate: u32) {
+        let remove = {
+            let count = map
+                .get_mut(&coordinate)
+                .expect("coordinate must exist in median multiset");
+            *count -= 1;
+            *count == 0
+        };
+        if remove {
+            map.remove(&coordinate);
+        }
+    }
+
+    fn desired_lower_len(&self) -> usize {
+        let total = self.lower_len + self.upper_len;
+        if total == 0 {
+            0
+        } else if self.reverse {
+            // The lower median in descending transcription order is the
+            // upper genomic median when the observation count is even.
+            total / 2 + 1
+        } else {
+            total.div_ceil(2)
+        }
+    }
+
+    fn rebalance(&mut self) {
+        let desired = self.desired_lower_len();
+        while self.lower_len > desired {
+            let coordinate = *self
+                .lower
+                .keys()
+                .next_back()
+                .expect("an oversized lower partition cannot be empty");
+            Self::decrement(&mut self.lower, coordinate);
+            self.lower_len -= 1;
+            Self::increment(&mut self.upper, coordinate);
+            self.upper_len += 1;
+        }
+        while self.lower_len < desired {
+            let coordinate = *self
+                .upper
+                .keys()
+                .next()
+                .expect("an undersized lower partition requires an upper value");
+            Self::decrement(&mut self.upper, coordinate);
+            self.upper_len -= 1;
+            Self::increment(&mut self.lower, coordinate);
+            self.lower_len += 1;
+        }
+    }
+
+    fn insert(&mut self, coordinate: u32) {
+        let belongs_in_lower = self
+            .lower
+            .keys()
+            .next_back()
+            .is_none_or(|&lower_max| coordinate <= lower_max);
+        if belongs_in_lower {
+            Self::increment(&mut self.lower, coordinate);
+            self.lower_len += 1;
+        } else {
+            Self::increment(&mut self.upper, coordinate);
+            self.upper_len += 1;
+        }
+        self.rebalance();
+    }
+
+    fn remove(&mut self, coordinate: u32) {
+        if self.lower.contains_key(&coordinate) {
+            Self::decrement(&mut self.lower, coordinate);
+            self.lower_len -= 1;
+        } else {
+            Self::decrement(&mut self.upper, coordinate);
+            self.upper_len -= 1;
+        }
+        self.rebalance();
+    }
+
+    fn median(&self) -> u32 {
+        *self
+            .lower
+            .keys()
+            .next_back()
+            .expect("endpoint consensus requires at least one observation")
+    }
+}
+
+#[derive(Clone, Debug)]
+struct EndpointConsensusState {
+    median: CoordinateMedian,
+    counts: BTreeMap<u32, usize>,
+    coordinates_by_count: BTreeMap<usize, BTreeSet<u32>>,
+    prefer_lower: bool,
+}
+
+impl EndpointConsensusState {
+    fn new(strand: Strand, prefer_lower: bool) -> Self {
+        Self {
+            median: CoordinateMedian::new(strand == Strand::Minus),
+            counts: BTreeMap::new(),
+            coordinates_by_count: BTreeMap::new(),
+            prefer_lower,
+        }
+    }
+
+    fn remove_count_group(&mut self, count: usize, coordinate: u32) {
+        let remove_group = {
+            let coordinates = self
+                .coordinates_by_count
+                .get_mut(&count)
+                .expect("endpoint frequency group must exist");
+            assert!(coordinates.remove(&coordinate));
+            coordinates.is_empty()
+        };
+        if remove_group {
+            self.coordinates_by_count.remove(&count);
+        }
+    }
+
+    fn insert(&mut self, coordinate: u32) {
+        self.median.insert(coordinate);
+        let old_count = self.counts.get(&coordinate).copied().unwrap_or(0);
+        if old_count > 0 {
+            self.remove_count_group(old_count, coordinate);
+        }
+        let new_count = old_count + 1;
+        self.counts.insert(coordinate, new_count);
+        self.coordinates_by_count
+            .entry(new_count)
+            .or_default()
+            .insert(coordinate);
+    }
+
+    fn remove(&mut self, coordinate: u32) {
+        self.median.remove(coordinate);
+        let old_count = self.counts[&coordinate];
+        self.remove_count_group(old_count, coordinate);
+        if old_count == 1 {
+            self.counts.remove(&coordinate);
+        } else {
+            let new_count = old_count - 1;
+            self.counts.insert(coordinate, new_count);
+            self.coordinates_by_count
+                .entry(new_count)
+                .or_default()
+                .insert(coordinate);
+        }
+    }
+
+    fn mode(&self) -> u32 {
+        let median = self.median.median();
+        let modal_coordinates = self
+            .coordinates_by_count
+            .last_key_value()
+            .map(|(_, coordinates)| coordinates)
+            .expect("endpoint consensus requires at least one frequency group");
+        let below = modal_coordinates.range(..=median).next_back().copied();
+        let above = modal_coordinates.range(median..).next().copied();
+
+        match (below, above) {
+            (Some(left), Some(right)) => {
+                let left_distance = median.abs_diff(left);
+                let right_distance = median.abs_diff(right);
+                match left_distance.cmp(&right_distance) {
+                    Ordering::Less => left,
+                    Ordering::Greater => right,
+                    Ordering::Equal if self.prefer_lower => left.min(right),
+                    Ordering::Equal => left.max(right),
+                }
+            }
+            (Some(coordinate), None) | (None, Some(coordinate)) => coordinate,
+            (None, None) => unreachable!("a modal frequency group cannot be empty"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ConsensusFamily {
+    members: Vec<usize>,
+    five_prime: EndpointConsensusState,
+    three_prime: EndpointConsensusState,
+    consensus: Interval,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConsensusSplitConfig {
+    score1_threshold: f64,
+    score2_threshold: f64,
+    options: TuClusteringOptions,
+    rule: ConsensusRule,
+}
+
+impl ConsensusFamily {
+    fn new(local_pos: usize, indices_sorted: &[usize], reads: &[ReadRecord]) -> Self {
+        let read = &reads[indices_sorted[local_pos]];
+        let five_prime_prefers_lower = read.strand != Strand::Minus;
+        let three_prime_prefers_lower = read.strand == Strand::Minus;
+        let mut five_prime = EndpointConsensusState::new(read.strand, five_prime_prefers_lower);
+        let mut three_prime = EndpointConsensusState::new(read.strand, three_prime_prefers_lower);
+        five_prime.insert(five_prime_coord(read));
+        three_prime.insert(three_prime_coord(read));
+        Self {
+            members: vec![local_pos],
+            five_prime,
+            three_prime,
+            consensus: read.interval,
+        }
+    }
+
+    fn consensus_interval(&self, strand: Strand) -> Interval {
+        let five_prime = self.five_prime.mode();
+        let three_prime = self.three_prime.mode();
+        let (start, end) = match strand {
+            Strand::Plus | Strand::Unknown => (five_prime, three_prime),
+            Strand::Minus => (three_prime, five_prime),
+        };
+        Interval::new(Coord::new(start), Coord::new(end))
+            .expect("coordinate-wise endpoint modes of valid intervals form a valid interval")
+    }
+
+    fn try_push(
+        &mut self,
+        local_pos: usize,
+        indices_sorted: &[usize],
+        reads: &[ReadRecord],
+        config: ConsensusSplitConfig,
+    ) -> bool {
+        let candidate = &reads[indices_sorted[local_pos]];
+        let anchor = &reads[indices_sorted[self.members[0]]];
+        if !interval_satisfies_consensus(
+            candidate,
+            anchor.interval,
+            config.score1_threshold,
+            config.score2_threshold,
+            config.options,
+            config.rule,
+        ) {
+            return false;
+        }
+
+        let five_prime = five_prime_coord(candidate);
+        let three_prime = three_prime_coord(candidate);
+        self.five_prime.insert(five_prime);
+        self.three_prime.insert(three_prime);
+        let prospective_consensus = self.consensus_interval(candidate.strand);
+
+        // Existing members were already checked against the current consensus.
+        // A stable mode therefore needs only one new check; the former code
+        // cloned, re-sorted, and rescanned the whole growing family here.
+        let all_direct = if prospective_consensus == self.consensus {
+            interval_satisfies_consensus(
+                candidate,
+                prospective_consensus,
+                config.score1_threshold,
+                config.score2_threshold,
+                config.options,
+                config.rule,
+            )
+        } else {
+            self.members
+                .iter()
+                .copied()
+                .chain(std::iter::once(local_pos))
+                .all(|member_pos| {
+                    interval_satisfies_consensus(
+                        &reads[indices_sorted[member_pos]],
+                        prospective_consensus,
+                        config.score1_threshold,
+                        config.score2_threshold,
+                        config.options,
+                        config.rule,
+                    )
+                })
+        };
+
+        if all_direct {
+            self.members.push(local_pos);
+            self.consensus = prospective_consensus;
+            true
+        } else {
+            self.five_prime.remove(five_prime);
+            self.three_prime.remove(three_prime);
+            false
+        }
+    }
 }
 
 /// Split a connected component into deterministic anchor-bounded consensus families.
@@ -875,51 +1377,29 @@ fn split_members_by_consensus(
     ordered
         .sort_by(|&a, &b| cmp_local_read_in_transcription_direction(indices_sorted, reads, a, b));
 
-    let mut families: Vec<Vec<usize>> = Vec::new();
+    let config = ConsensusSplitConfig {
+        score1_threshold,
+        score2_threshold,
+        options,
+        rule,
+    };
+    let mut families: Vec<ConsensusFamily> = Vec::new();
     for local_pos in ordered {
-        let candidate = &reads[indices_sorted[local_pos]];
         let mut selected_family = None;
 
-        for (family_idx, family) in families.iter().enumerate() {
-            let anchor = &reads[indices_sorted[family[0]]];
-            if !interval_satisfies_consensus(
-                candidate,
-                anchor.interval,
-                score1_threshold,
-                score2_threshold,
-                options,
-                rule,
-            ) {
-                continue;
-            }
-
-            let mut prospective = family.clone();
-            prospective.push(local_pos);
-            let (consensus, _) = consensus_for_members(&prospective, indices_sorted, reads);
-            let all_direct = prospective.iter().all(|&member_pos| {
-                interval_satisfies_consensus(
-                    &reads[indices_sorted[member_pos]],
-                    consensus,
-                    score1_threshold,
-                    score2_threshold,
-                    options,
-                    rule,
-                )
-            });
-            if all_direct {
+        for (family_idx, family) in families.iter_mut().enumerate() {
+            if family.try_push(local_pos, indices_sorted, reads, config) {
                 selected_family = Some(family_idx);
                 break;
             }
         }
 
-        if let Some(family_idx) = selected_family {
-            families[family_idx].push(local_pos);
-        } else {
-            families.push(vec![local_pos]);
+        if selected_family.is_none() {
+            families.push(ConsensusFamily::new(local_pos, indices_sorted, reads));
         }
     }
 
-    families
+    families.into_iter().map(|family| family.members).collect()
 }
 
 fn representative_read_index(
@@ -1023,6 +1503,103 @@ struct TuNoId {
 struct PartitionClusteringResult {
     tus: Vec<TuNoId>,
     local_read_to_tu: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct FinalConsensusFamily {
+    rep_read_index: usize,
+    members: Vec<usize>,
+    interval: Interval,
+    endpoint_stats: TuEndpointStats,
+}
+
+fn final_consensus_family(
+    members: Vec<usize>,
+    indices_sorted: &[usize],
+    reads: &[ReadRecord],
+    score1_threshold: f64,
+    score2_threshold: f64,
+    options: TuClusteringOptions,
+) -> FinalConsensusFamily {
+    let rep_read_index = representative_read_index(&members, indices_sorted, reads);
+    let (interval, endpoint_stats) = consensus_for_members(&members, indices_sorted, reads);
+    debug_assert!(members.iter().all(|&local_pos| {
+        interval_satisfies_consensus(
+            &reads[indices_sorted[local_pos]],
+            interval,
+            score1_threshold,
+            score2_threshold,
+            options,
+            ConsensusRule::Final,
+        )
+    }));
+    FinalConsensusFamily {
+        rep_read_index,
+        members,
+        interval,
+        endpoint_stats,
+    }
+}
+
+/// Coalesce families that emit the same consensus interval.
+///
+/// Separate anchor-bounded families can converge on identical endpoint modes. Since every
+/// member already qualifies directly against that shared consensus, retaining both families
+/// would emit duplicate biological TUs and duplicate coordinate-derived IDs.
+fn coalesce_identical_consensus_families(
+    families: Vec<FinalConsensusFamily>,
+    indices_sorted: &[usize],
+    reads: &[ReadRecord],
+    score1_threshold: f64,
+    score2_threshold: f64,
+    options: TuClusteringOptions,
+) -> Vec<FinalConsensusFamily> {
+    let mut by_interval: BTreeMap<Interval, Vec<FinalConsensusFamily>> = BTreeMap::new();
+    for family in families {
+        by_interval.entry(family.interval).or_default().push(family);
+    }
+
+    let mut coalesced = Vec::new();
+    for (shared_interval, mut matching) in by_interval {
+        if matching.len() == 1 {
+            coalesced.push(matching.pop().expect("one matching family exists"));
+            continue;
+        }
+
+        let merged_members: Vec<usize> = matching
+            .iter()
+            .flat_map(|family| family.members.iter().copied())
+            .collect();
+        let (merged_interval, _) = consensus_for_members(&merged_members, indices_sorted, reads);
+        let merged_is_valid = merged_interval == shared_interval
+            && merged_members.iter().all(|&local_pos| {
+                interval_satisfies_consensus(
+                    &reads[indices_sorted[local_pos]],
+                    merged_interval,
+                    score1_threshold,
+                    score2_threshold,
+                    options,
+                    ConsensusRule::Final,
+                )
+            });
+
+        if merged_is_valid {
+            coalesced.push(final_consensus_family(
+                merged_members,
+                indices_sorted,
+                reads,
+                score1_threshold,
+                score2_threshold,
+                options,
+            ));
+        } else {
+            // Preserve the validated families if their union changes the modal consensus.
+            coalesced.extend(matching);
+        }
+    }
+
+    coalesced.sort_by(|a, b| cmp_read_idx(reads, a.rep_read_index, b.rep_read_index));
+    coalesced
 }
 
 fn partition_into_regions(indices_sorted: &[usize], reads: &[ReadRecord]) -> Vec<(usize, usize)> {
@@ -1176,7 +1753,7 @@ fn cluster_tus_region(
             .extend(cluster.members.iter().copied());
     }
 
-    let mut final_families: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut final_families: Vec<FinalConsensusFamily> = Vec::new();
     for members in members_by_root.into_values() {
         for family in split_members_by_consensus(
             &members,
@@ -1187,35 +1764,37 @@ fn cluster_tus_region(
             options,
             ConsensusRule::Final,
         ) {
-            let rep_read_index = representative_read_index(&family, indices_sorted, reads);
-            final_families.push((rep_read_index, family));
-        }
-    }
-    final_families.sort_by(|(a_rep, _), (b_rep, _)| cmp_read_idx(reads, *a_rep, *b_rep));
-
-    let mut tus: Vec<TuNoId> = Vec::with_capacity(final_families.len());
-    let mut local_read_to_tu: Vec<usize> = vec![usize::MAX; indices_sorted.len()];
-    for (tu_index, (rep_read_index, members)) in final_families.into_iter().enumerate() {
-        let rep = &reads[rep_read_index];
-        let (interval, endpoint_stats) = consensus_for_members(&members, indices_sorted, reads);
-        debug_assert!(members.iter().all(|&local_pos| {
-            interval_satisfies_consensus(
-                &reads[indices_sorted[local_pos]],
-                interval,
+            final_families.push(final_consensus_family(
+                family,
+                indices_sorted,
+                reads,
                 score1_threshold,
                 score2_threshold,
                 options,
-                ConsensusRule::Final,
-            )
-        }));
+            ));
+        }
+    }
+    final_families = coalesce_identical_consensus_families(
+        final_families,
+        indices_sorted,
+        reads,
+        score1_threshold,
+        score2_threshold,
+        options,
+    );
+
+    let mut tus: Vec<TuNoId> = Vec::with_capacity(final_families.len());
+    let mut local_read_to_tu: Vec<usize> = vec![usize::MAX; indices_sorted.len()];
+    for (tu_index, family) in final_families.into_iter().enumerate() {
+        let rep = &reads[family.rep_read_index];
         tus.push(TuNoId {
             contig: rep.contig.clone(),
             strand: rep.strand,
-            interval,
-            rep_read_index,
-            endpoint_stats,
+            interval: family.interval,
+            rep_read_index: family.rep_read_index,
+            endpoint_stats: family.endpoint_stats,
         });
-        for local_pos in members {
+        for local_pos in family.members {
             local_read_to_tu[local_pos] = tu_index;
         }
     }
@@ -1517,6 +2096,100 @@ mod tests {
         }
     }
 
+    fn assign_reads_to_tus_naive_for_test(
+        reads: &[ReadRecord],
+        tus: &[Tu],
+        score1_threshold: f64,
+        score2_threshold: f64,
+        options: TuClusteringOptions,
+        ambiguity_margin: f64,
+        fractional_assignment: bool,
+    ) -> Vec<ReadAssignment> {
+        reads
+            .iter()
+            .map(|read| {
+                let candidates = tus
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(tu_index, candidate_tu)| {
+                        assignment_candidate(
+                            read,
+                            candidate_tu,
+                            tu_index,
+                            score1_threshold,
+                            score2_threshold,
+                            options,
+                        )
+                    })
+                    .collect();
+                classify_assignment_candidates(
+                    candidates,
+                    tus,
+                    ambiguity_margin,
+                    fractional_assignment,
+                )
+            })
+            .collect()
+    }
+
+    fn split_members_by_consensus_naive_for_test(
+        members: &[usize],
+        indices_sorted: &[usize],
+        reads: &[ReadRecord],
+        score1_threshold: f64,
+        score2_threshold: f64,
+        options: TuClusteringOptions,
+        rule: ConsensusRule,
+    ) -> Vec<Vec<usize>> {
+        let mut ordered = members.to_vec();
+        ordered.sort_by(|&a, &b| {
+            cmp_local_read_in_transcription_direction(indices_sorted, reads, a, b)
+        });
+
+        let mut families: Vec<Vec<usize>> = Vec::new();
+        for local_pos in ordered {
+            let candidate = &reads[indices_sorted[local_pos]];
+            let mut selected_family = None;
+            for (family_idx, family) in families.iter().enumerate() {
+                let anchor = &reads[indices_sorted[family[0]]];
+                if !interval_satisfies_consensus(
+                    candidate,
+                    anchor.interval,
+                    score1_threshold,
+                    score2_threshold,
+                    options,
+                    rule,
+                ) {
+                    continue;
+                }
+
+                let mut prospective = family.clone();
+                prospective.push(local_pos);
+                let (consensus, _) = consensus_for_members(&prospective, indices_sorted, reads);
+                if prospective.iter().all(|&member_pos| {
+                    interval_satisfies_consensus(
+                        &reads[indices_sorted[member_pos]],
+                        consensus,
+                        score1_threshold,
+                        score2_threshold,
+                        options,
+                        rule,
+                    )
+                }) {
+                    selected_family = Some(family_idx);
+                    break;
+                }
+            }
+
+            if let Some(family_idx) = selected_family {
+                families[family_idx].push(local_pos);
+            } else {
+                families.push(vec![local_pos]);
+            }
+        }
+        families
+    }
+
     #[test]
     fn clustering_result_accessors_preserve_alignment() {
         let reads = vec![
@@ -1534,6 +2207,51 @@ mod tests {
         let (tus, read_to_tu, endpoint_stats) = result.into_parts();
         assert_eq!(tus.len(), endpoint_stats.len());
         assert!(read_to_tu.iter().all(|&tu_index| tu_index < tus.len()));
+    }
+
+    #[test]
+    fn dense_duplicate_locus_does_not_rebuild_the_growing_family() {
+        const READ_COUNT: usize = 50_000;
+        let reads: Vec<ReadRecord> = (0..READ_COUNT)
+            .map(|index| read("chr", Strand::Plus, 100, 1_100, &format!("r{index}")))
+            .collect();
+
+        let result = cluster_tus(&reads, 0.95, 0.80).unwrap();
+
+        assert_eq!(result.tus().len(), 1);
+        assert_eq!(result.endpoint_stats()[0].support, READ_COUNT);
+        assert!(result.read_to_tu().iter().all(|&tu_index| tu_index == 0));
+    }
+
+    #[test]
+    fn coordinate_identical_final_families_are_coalesced() {
+        let reads = vec![
+            read("chr", Strand::Plus, 100, 200, "family_a"),
+            read("chr", Strand::Plus, 100, 200, "family_b"),
+        ];
+        let indices_sorted = vec![0, 1];
+        let options = TuClusteringOptions::default();
+        let families = vec![
+            final_consensus_family(vec![0], &indices_sorted, &reads, 0.95, 0.80, options),
+            final_consensus_family(vec![1], &indices_sorted, &reads, 0.95, 0.80, options),
+        ];
+
+        let coalesced = coalesce_identical_consensus_families(
+            families,
+            &indices_sorted,
+            &reads,
+            0.95,
+            0.80,
+            options,
+        );
+
+        assert_eq!(coalesced.len(), 1);
+        assert_eq!(coalesced[0].members, vec![0, 1]);
+        assert_eq!(coalesced[0].endpoint_stats.support, 2);
+        assert_eq!(
+            coalesced[0].interval,
+            Interval::new(Coord::new(100), Coord::new(200)).unwrap()
+        );
     }
 
     #[test]
@@ -1713,6 +2431,53 @@ mod tests {
         };
 
         assert_eq!(summarize(&canonical), summarize(&permuted));
+    }
+
+    #[test]
+    fn assignment_interval_index_skips_distant_tus() {
+        let tus: Vec<Tu> = (0..20_000u32)
+            .map(|index| {
+                let start = index * 10;
+                tu("chr", Strand::Plus, start, start + 5, &format!("TU{index}"))
+            })
+            .collect();
+        let index = TuIntervalIndex::build((0..tus.len()).collect(), &tus);
+        let query = Interval::new(Coord::new(100_002), Coord::new(100_004)).unwrap();
+        let mut visited = Vec::new();
+        index.for_each_overlap(query, &tus, |tu_index| visited.push(tu_index));
+
+        assert_eq!(visited, vec![10_000]);
+        assert!(
+            visited.len() * 1_000 < tus.len(),
+            "a local assignment query must not degrade to scanning the TU collection"
+        );
+    }
+
+    #[test]
+    fn indexed_assignment_matches_naive_with_unsorted_tus() {
+        let reads = vec![
+            read("chr2", Strand::Minus, 190, 260, "r0"),
+            read("chr1", Strand::Plus, 95, 205, "r1"),
+            read("chr1", Strand::Minus, 100, 200, "r2"),
+            read("chr1", Strand::Plus, 500, 550, "r3"),
+        ];
+        let tus = vec![
+            tu("chr1", Strand::Plus, 490, 560, "TU_D"),
+            tu("chr2", Strand::Minus, 200, 270, "TU_C"),
+            tu("chr1", Strand::Plus, 90, 200, "TU_B"),
+            tu("chr1", Strand::Minus, 90, 210, "TU_E"),
+            tu("chr1", Strand::Plus, 100, 210, "TU_A"),
+            tu("chr3", Strand::Plus, 0, 1_000, "TU_F"),
+        ];
+        let options = TuClusteringOptions {
+            max_five_prime_delta_bp: Some(20),
+            ..TuClusteringOptions::default()
+        };
+
+        let indexed = assign_reads_to_tus(&reads, &tus, 0.80, 0.70, options, 0.05, true).unwrap();
+        let naive =
+            assign_reads_to_tus_naive_for_test(&reads, &tus, 0.80, 0.70, options, 0.05, true);
+        assert_eq!(indexed, naive);
     }
 
     fn assignments_by_read_id(
@@ -2304,6 +3069,154 @@ mod tests {
     }
 
     proptest! {
+        #[test]
+        fn incremental_endpoint_consensus_matches_batch_modes(
+            coordinates in prop::collection::vec(0u32..1_000, 1..80),
+            reverse in any::<bool>(),
+            five_prime in any::<bool>(),
+        ) {
+            let strand = if reverse { Strand::Minus } else { Strand::Plus };
+            let prefer_lower = matches!(
+                (strand, five_prime),
+                (Strand::Plus, true) | (Strand::Minus, false)
+            );
+            let mut state = EndpointConsensusState::new(strand, prefer_lower);
+            let mut observed = Vec::new();
+
+            for &coordinate in &coordinates {
+                state.insert(coordinate);
+                observed.push(coordinate);
+                prop_assert_eq!(
+                    state.mode(),
+                    modal_consensus_endpoint(&observed, strand, five_prime)
+                );
+            }
+
+            for &coordinate in coordinates.iter().rev().take(coordinates.len() - 1) {
+                state.remove(coordinate);
+                observed.pop();
+                prop_assert_eq!(
+                    state.mode(),
+                    modal_consensus_endpoint(&observed, strand, five_prime)
+                );
+            }
+        }
+
+        #[test]
+        fn incremental_family_splitting_matches_batch_reference(
+            interval_specs in prop::collection::vec((0u32..500, 1u32..200), 1..24),
+            reverse in any::<bool>(),
+            attach_contained_reads in any::<bool>(),
+        ) {
+            let strand = if reverse { Strand::Minus } else { Strand::Plus };
+            let reads: Vec<ReadRecord> = interval_specs
+                .into_iter()
+                .enumerate()
+                .map(|(index, (start, len))| {
+                    read("chr", strand, start, start + len, &format!("r{index:03}"))
+                })
+                .collect();
+            let mut indices_sorted: Vec<usize> = (0..reads.len()).collect();
+            indices_sorted.sort_unstable_by(|&a, &b| cmp_read_idx(&reads, a, b));
+            let members: Vec<usize> = (0..reads.len()).collect();
+            let options = TuClusteringOptions {
+                attach_contained_reads,
+                three_prime_tolerance_bp: 20,
+                max_five_prime_delta_bp: Some(15),
+            };
+
+            for rule in [ConsensusRule::Score1Only, ConsensusRule::Final] {
+                let incremental = split_members_by_consensus(
+                    &members,
+                    &indices_sorted,
+                    &reads,
+                    0.75,
+                    0.60,
+                    options,
+                    rule,
+                );
+                let reference = split_members_by_consensus_naive_for_test(
+                    &members,
+                    &indices_sorted,
+                    &reads,
+                    0.75,
+                    0.60,
+                    options,
+                    rule,
+                );
+                prop_assert_eq!(incremental, reference);
+            }
+        }
+
+        #[test]
+        fn indexed_assignment_matches_naive_randomized_unordered_inputs(
+            read_specs in prop::collection::vec(
+                (0u8..2, 0u8..2, 0u32..500, 0u32..100),
+                0..20,
+            ),
+            tu_specs in prop::collection::vec(
+                (0u8..2, 0u8..2, 0u32..500, 0u32..100),
+                0..20,
+            ),
+            attach_contained_reads in any::<bool>(),
+            fractional_assignment in any::<bool>(),
+        ) {
+            let choose_contig = |key| if key == 0 { "chr1" } else { "chr2" };
+            let choose_strand = |key| if key == 0 { Strand::Plus } else { Strand::Minus };
+            let reads: Vec<ReadRecord> = read_specs
+                .into_iter()
+                .enumerate()
+                .map(|(index, (contig, strand, start, len))| {
+                    read(
+                        choose_contig(contig),
+                        choose_strand(strand),
+                        start,
+                        start + len,
+                        &format!("r{index}"),
+                    )
+                })
+                .collect();
+            let tus: Vec<Tu> = tu_specs
+                .into_iter()
+                .enumerate()
+                .map(|(index, (contig, strand, start, len))| {
+                    tu(
+                        choose_contig(contig),
+                        choose_strand(strand),
+                        start,
+                        start + len,
+                        &format!("TU{index:06}"),
+                    )
+                })
+                .collect();
+            let options = TuClusteringOptions {
+                attach_contained_reads,
+                three_prime_tolerance_bp: 20,
+                max_five_prime_delta_bp: Some(15),
+            };
+
+            let indexed = assign_reads_to_tus(
+                &reads,
+                &tus,
+                0.75,
+                0.60,
+                options,
+                0.05,
+                fractional_assignment,
+            ).unwrap();
+            let naive = assign_reads_to_tus_naive_for_test(
+                &reads,
+                &tus,
+                0.75,
+                0.60,
+                options,
+                0.05,
+                fractional_assignment,
+            );
+
+            prop_assert_eq!(indexed, naive);
+        }
+
         #[test]
         fn random_input_permutations_preserve_assignments(keys in prop::collection::vec(any::<u64>(), 8)) {
             let canonical = vec![

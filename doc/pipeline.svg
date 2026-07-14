@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
-  <title id="title">trackclusterTU pipeline and method overview</title>
-  <desc id="desc">Simplified publication figure showing the trackclusterTU pipeline, two-round TU clustering, and independent optional diagnostic and missed-TU rescue branches.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1260" role="img" aria-labelledby="title desc">
+  <title id="title">trackclusterTU current pipeline and method overview</title>
+  <desc id="desc">Publication-style figure showing the mapping workflow, deterministic two-pass TU discovery, post-filter read reassignment, and independent optional missed-TU diagnosis and rescue commands.</desc>
   <defs>
     <marker id="arrowTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10Z" fill="#0f766e"/>
@@ -13,24 +13,30 @@
       <path d="M0 0L10 5L0 10Z" fill="#475569"/>
     </marker>
     <style>
-      .title { font: 800 38px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; letter-spacing: 0; }
-      .subtitle { font: 500 18px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #475569; letter-spacing: 0; }
-      .panel-label { font: 800 22px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; letter-spacing: 0; }
-      .panel-title { font: 800 20px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; letter-spacing: 0; }
-      .box-title { font: 800 18px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; letter-spacing: 0; }
-      .box-title-teal { font: 800 18px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #0f766e; letter-spacing: 0; }
-      .box-title-orange { font: 800 18px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #ea580c; letter-spacing: 0; }
-      .body { font: 500 14px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #475569; letter-spacing: 0; }
-      .small { font: 500 12.5px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #64748b; letter-spacing: 0; }
-      .mono { font: 650 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #334155; letter-spacing: 0; }
+      .title { font: 800 38px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 500 18px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #475569; }
+      .panel-label { font: 800 22px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; }
+      .panel-title { font: 800 20px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; }
+      .box-title { font: 800 17px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #111827; }
+      .box-title-teal { font: 800 17px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #0f766e; }
+      .box-title-orange { font: 800 17px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #ea580c; }
+      .body { font: 500 14px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #475569; }
+      .small { font: 500 12.5px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #64748b; }
+      .tiny { font: 600 11.5px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #64748b; }
+      .mono { font: 650 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #334155; }
+      .arrow-label { font: 700 11.5px Inter, Avenir, Helvetica, Arial, sans-serif; fill: #64748b; }
       .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
       .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; }
       .box-teal { fill: #f0fdfa; stroke: #0f766e; stroke-width: 1.6; }
       .box-orange { fill: #fff7ed; stroke: #ea580c; stroke-width: 1.6; }
       .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .note-teal { fill: #f0fdfa; stroke: #99f6e4; stroke-width: 1.2; }
+      .badge { fill: #ffffff; stroke: #99f6e4; stroke-width: 1.2; }
       .arrow { fill: none; stroke: #0f766e; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowTeal); }
+      .arrow-gray { fill: none; stroke: #475569; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowGray); }
+      .arrow-gray-dashed { fill: none; stroke: #64748b; stroke-width: 2.1; stroke-dasharray: 7 6; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowGray); }
       .arrow-orange { fill: none; stroke: #ea580c; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowOrange); }
-      .arrow-gray { fill: none; stroke: #475569; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowGray); }
+      .arrow-orange-dashed { fill: none; stroke: #ea580c; stroke-width: 2.5; stroke-dasharray: 7 6; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowOrange); }
       .read-teal { fill: none; stroke: #0f766e; stroke-width: 4; stroke-linecap: round; }
       .read-orange { fill: none; stroke: #ea580c; stroke-width: 4; stroke-linecap: round; }
       .read-gray { fill: none; stroke: #64748b; stroke-width: 4; stroke-linecap: round; }
@@ -42,180 +48,261 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1600" height="1000" fill="#ffffff"/>
+  <rect x="0" y="0" width="1600" height="1260" fill="#ffffff"/>
 
   <g transform="translate(80 64)">
     <text class="title" x="0" y="0">trackclusterTU pipeline</text>
-    <text class="subtitle" x="0" y="34">Long-read bacterial transcript-unit discovery with two-round interval clustering and optional boundary-mode rescue.</text>
+    <text class="subtitle" x="0" y="34">Deterministic, strand-aware bacterial transcript-unit discovery with optional boundary-mode rescue.</text>
   </g>
 
-  <g transform="translate(1190 42)">
-    <rect class="note" x="0" y="0" width="330" height="92" rx="10"/>
-    <text class="mono" x="22" y="31">span Jaccard = overlap / union</text>
-    <text class="mono" x="22" y="55">overlap / longer = overlap / max(len)</text>
-    <text class="mono" x="22" y="79">default thresholds: 0.95, 0.80</text>
+  <g transform="translate(1178 38)">
+    <rect class="note" x="0" y="0" width="342" height="96" rx="10"/>
+    <text class="mono" x="20" y="31">span Jaccard = overlap / union</text>
+    <text class="mono" x="20" y="56">overlap / longer = overlap / max(len)</text>
+    <text class="mono" x="20" y="81">defaults: 0.95, 0.80; |Δ3′| ≤ 12 bp</text>
   </g>
 
   <g id="panel-a" transform="translate(80 160)">
-    <rect class="panel" x="0" y="0" width="1440" height="190" rx="12"/>
+    <rect class="panel" x="0" y="0" width="1440" height="220" rx="12"/>
     <text class="panel-label" x="24" y="40">A</text>
-    <text class="panel-title" x="58" y="40">Main workflow</text>
+    <text class="panel-title" x="58" y="40">Inputs and main workflow</text>
 
-    <g transform="translate(84 72)">
-      <rect class="box" x="0" y="0" width="170" height="82" rx="8"/>
-      <text class="box-title" x="18" y="31">Input reads</text>
-      <text class="body" x="18" y="55">FASTQ manifest</text>
-      <text class="small" x="18" y="73">sample, group, reads</text>
+    <g transform="translate(258 50)">
+      <rect class="note" x="0" y="0" width="194" height="36" rx="7"/>
+      <text class="mono" x="20" y="23">reference FASTA</text>
+    </g>
+    <path class="arrow-gray" d="M355 86V90H345V92"/>
+
+    <g transform="translate(1122 50)">
+      <rect class="note" x="0" y="0" width="250" height="36" rx="7"/>
+      <text class="mono" x="16" y="23">optional GFF3 / BED6 annotation</text>
+    </g>
+    <path class="arrow-gray-dashed" d="M1247 86V90H1285V92"/>
+
+    <g transform="translate(60 92)">
+      <rect class="box" x="0" y="0" width="160" height="104" rx="8"/>
+      <text class="box-title" x="16" y="30">Input reads</text>
+      <text class="body" x="16" y="55">FASTQ manifest</text>
+      <text class="small" x="16" y="77">sample, group, reads</text>
     </g>
 
-    <path class="arrow" d="M266 113H336"/>
-    <g transform="translate(348 72)">
-      <rect class="box" x="0" y="0" width="170" height="82" rx="8"/>
-      <text class="box-title" x="18" y="31">Map</text>
-      <text class="body" x="18" y="55">minimap2</text>
-      <text class="small" x="18" y="73">samtools sort/index</text>
+    <path class="arrow" d="M232 144H258"/>
+    <g transform="translate(270 92)">
+      <rect class="box" x="0" y="0" width="170" height="104" rx="8"/>
+      <text class="box-title" x="16" y="30">Map and align</text>
+      <text class="body" x="16" y="55">minimap2</text>
+      <text class="small" x="16" y="77">samtools view / sort / index</text>
     </g>
 
-    <path class="arrow" d="M530 113H600"/>
-    <g transform="translate(612 72)">
-      <rect class="box" x="0" y="0" width="170" height="82" rx="8"/>
-      <text class="box-title" x="18" y="31">BED6 spans</text>
-      <text class="body" x="18" y="55">pooled intervals</text>
-      <text class="small" x="18" y="73">sample-tagged reads</text>
+    <path class="arrow" d="M452 144H478"/>
+    <g transform="translate(490 92)">
+      <rect class="box" x="0" y="0" width="190" height="104" rx="8"/>
+      <text class="box-title" x="16" y="30">BAM → BED6</text>
+      <text class="body" x="16" y="55">strand-aware outer spans</text>
+      <text class="small" x="16" y="77">conversion + evidence QC</text>
     </g>
 
-    <path class="arrow" d="M794 113H864"/>
-    <g transform="translate(876 58)">
-      <rect class="box-teal" x="0" y="0" width="212" height="110" rx="8"/>
-      <text class="box-title-teal" x="18" y="31">TU clustering</text>
-      <text class="body" x="18" y="55">round 1: span-Jaccard seeds</text>
-      <text class="body" x="18" y="78">round 2: overlap/longer attach</text>
-      <g transform="translate(23 89)">
-        <path class="read-teal" d="M0 0h58"/>
-        <path class="read-orange" d="M78 0h58"/>
-      </g>
+    <path class="arrow" d="M692 144H718"/>
+    <g transform="translate(730 92)">
+      <rect class="box" x="0" y="0" width="170" height="104" rx="8"/>
+      <text class="box-title" x="16" y="30">Validate and pool</text>
+      <text class="body" x="16" y="55">filters + rejection audit</text>
+      <text class="small" x="16" y="77">sample-tagged reads</text>
     </g>
 
-    <path class="arrow" d="M1100 113H1170"/>
-    <g transform="translate(1182 72)">
-      <rect class="box" x="0" y="0" width="190" height="82" rx="8"/>
-      <text class="box-title" x="18" y="31">Outputs</text>
-      <text class="body" x="18" y="55">TUs, membership</text>
-      <text class="small" x="18" y="73">TU/gene count tables</text>
+    <path class="arrow" d="M912 144H938"/>
+    <g transform="translate(950 92)">
+      <rect class="box-teal" x="0" y="0" width="180" height="104" rx="8"/>
+      <text class="box-title-teal" x="16" y="30">TU discovery</text>
+      <text class="body" x="16" y="55">span-based seed pass</text>
+      <text class="small" x="16" y="77">optional pass 2 + consensus</text>
     </g>
 
-    <g transform="translate(612 22)">
-      <rect class="note" x="0" y="0" width="224" height="34" rx="7"/>
-      <text class="mono" x="14" y="22">reference + annotation</text>
+    <path class="arrow" d="M1142 144H1168"/>
+    <g transform="translate(1180 92)">
+      <rect class="box" x="0" y="0" width="220" height="104" rx="8"/>
+      <text class="box-title" x="16" y="28">Published outputs</text>
+      <text class="body" x="16" y="51">TUs + membership v2</text>
+      <text class="small" x="16" y="72">counts + optional gene outputs</text>
+      <text class="small" x="16" y="91">atomic commit + run manifest</text>
     </g>
-    <path class="arrow-gray" d="M836 39C893 39 898 65 914 78"/>
   </g>
 
-  <g id="panel-b" transform="translate(80 390)">
-    <rect class="panel" x="0" y="0" width="1440" height="270" rx="12"/>
+  <g id="panel-b" transform="translate(80 410)">
+    <rect class="panel" x="0" y="0" width="1440" height="310" rx="12"/>
     <text class="panel-label" x="24" y="40">B</text>
-    <text class="panel-title" x="58" y="40">Two-round clustering design</text>
+    <text class="panel-title" x="58" y="40">Deterministic TU discovery</text>
+    <text class="small" x="345" y="40">Final membership cannot be justified only by a chain of intermediate reads.</text>
 
-    <g transform="translate(82 78)">
-      <rect class="box" x="0" y="0" width="250" height="144" rx="8"/>
-      <text class="box-title" x="20" y="30">Partition</text>
-      <text class="body" x="20" y="54">contig + strand</text>
-      <text class="body" x="20" y="76">overlap regions</text>
-      <g transform="translate(24 100)">
-        <path class="thin-track" d="M0 0h180"/>
-        <path class="read-teal" d="M14 0h66"/>
-        <path class="read-gray" d="M70 18h76"/>
-        <path class="read-orange" d="M132 36h52"/>
+    <g transform="translate(50 82)">
+      <rect class="box" x="0" y="0" width="210" height="178" rx="8"/>
+      <text class="box-title" x="18" y="30">Partition</text>
+      <text class="body" x="18" y="55">contig + strand</text>
+      <text class="body" x="18" y="77">overlap-connected regions</text>
+      <text class="small" x="18" y="99">deterministic ordering</text>
+      <g transform="translate(18 126)">
+        <path class="thin-track" d="M0 0h168"/>
+        <path class="read-teal" d="M10 0h58"/>
+        <path class="read-gray" d="M61 18h70"/>
+        <path class="read-orange" d="M117 36h48"/>
       </g>
     </g>
 
-    <path class="arrow" d="M344 150H430"/>
-    <g transform="translate(442 78)">
-      <rect class="box-teal" x="0" y="0" width="260" height="144" rx="8"/>
-      <text class="box-title-teal" x="20" y="30">Round 1</text>
-      <text class="body" x="20" y="54">seed clusters by span Jaccard</text>
-      <text class="small" x="20" y="75">high-overlap intervals joined by DSU</text>
-      <g transform="translate(30 92)">
-        <path class="read-teal" d="M0 0h80M12 17h78M4 34h80"/>
-        <path class="read-orange" d="M132 0h70M146 17h68M132 34h70"/>
-        <ellipse class="cluster-teal" cx="48" cy="17" rx="54" ry="30"/>
-        <ellipse class="cluster-orange" cx="168" cy="17" rx="48" ry="30"/>
+    <path class="arrow" d="M272 171H288"/>
+    <g transform="translate(300 82)">
+      <rect class="box-teal" x="0" y="0" width="250" height="178" rx="8"/>
+      <text class="box-title-teal" x="18" y="30">Pass 1: seed clusters</text>
+      <text class="body" x="18" y="55">span-Jaccard edges → DSU</text>
+      <text class="small" x="18" y="78">split each component by a fixed</text>
+      <text class="small" x="18" y="97">anchor + prospective consensus</text>
+      <g transform="translate(28 124)">
+        <path class="read-teal" d="M0 0h70M12 17h72M4 34h70"/>
+        <path class="read-orange" d="M132 0h62M143 17h65M132 34h62"/>
+        <ellipse class="cluster-teal" cx="43" cy="17" rx="49" ry="29"/>
+        <ellipse class="cluster-orange" cx="165" cy="17" rx="45" ry="29"/>
       </g>
     </g>
 
-    <path class="arrow" d="M714 150H800"/>
-    <g transform="translate(812 78)">
-      <rect class="box-teal" x="0" y="0" width="280" height="144" rx="8"/>
-      <text class="box-title-teal" x="20" y="30">Round 2</text>
-      <text class="body" x="20" y="54">attach contained seed clusters</text>
-      <text class="small" x="20" y="75">overlap/longer + strand-aware 3p tolerance</text>
-      <g transform="translate(32 102)">
-        <path class="read-teal" d="M0 0h146"/>
-        <path class="read-orange" d="M36 22h88"/>
-        <path class="arrow-gray" d="M130 22C164 22 174 0 206 0"/>
+    <path class="arrow" d="M562 171H578"/>
+    <g transform="translate(590 82)">
+      <rect class="box-teal" x="0" y="0" width="310" height="178" rx="8"/>
+      <text class="box-title-teal" x="18" y="30">Pass 2: best seed attachment</text>
+      <text class="body" x="18" y="55">orient shorter → longer representative</text>
+      <text class="small" x="18" y="78">require |Δ3′| ≤ tolerance and</text>
+      <text class="small" x="18" y="98">overlap / longer ≥ threshold</text>
+      <text class="small" x="18" y="118">or the optional |Δ5′| cap</text>
+      <text class="tiny" x="18" y="140">equal-length ties are deterministic</text>
+      <g transform="translate(24 159)">
+        <path class="read-teal" d="M0 0h130"/>
+        <path class="read-orange" d="M38 17h78"/>
+        <path class="arrow-gray" d="M125 17C155 17 168 0 202 0"/>
       </g>
     </g>
 
-    <path class="arrow" d="M1104 150H1190"/>
-    <g transform="translate(1202 78)">
-      <rect class="box" x="0" y="0" width="170" height="144" rx="8"/>
-      <text class="box-title" x="20" y="30">Final TUs</text>
-      <text class="body" x="20" y="54">representative spans</text>
-      <text class="small" x="20" y="75">read-to-TU membership</text>
-      <g transform="translate(24 106)">
-        <rect class="tu-teal" x="0" y="0" width="64" height="14" rx="3"/>
-        <rect class="tu-orange" x="76" y="0" width="58" height="14" rx="3"/>
+    <path class="arrow" d="M912 171H928"/>
+    <path class="arrow-gray-dashed" d="M550 105C690 45 850 45 940 105"/>
+    <text class="arrow-label" x="694" y="62">pass 2 disabled</text>
+    <g transform="translate(940 82)">
+      <rect class="box-teal" x="0" y="0" width="250" height="178" rx="8"/>
+      <text class="box-title-teal" x="18" y="30">Final refinement</text>
+      <text class="body" x="18" y="55">resolve attachment roots</text>
+      <text class="small" x="18" y="78">re-split against final consensus</text>
+      <text class="small" x="18" y="98">coalesce valid identical spans</text>
+      <text class="small" x="18" y="122">prevents path-only membership</text>
+      <g transform="translate(30 148)">
+        <rect class="tu-teal" x="0" y="0" width="75" height="14" rx="3"/>
+        <rect class="tu-orange" x="90" y="0" width="64" height="14" rx="3"/>
       </g>
+    </g>
+
+    <path class="arrow" d="M1202 171H1218"/>
+    <g transform="translate(1230 82)">
+      <rect class="box" x="0" y="0" width="160" height="178" rx="8"/>
+      <text class="box-title" x="16" y="30">Consensus TUs</text>
+      <text class="body" x="16" y="55">modal 5′ / 3′</text>
+      <text class="body" x="16" y="76">support endpoints</text>
+      <text class="small" x="16" y="103">longest read is</text>
+      <text class="small" x="16" y="121">an example only</text>
+      <text class="tiny" x="16" y="148">not representative</text>
+      <text class="tiny" x="16" y="164">read spans</text>
     </g>
   </g>
 
-  <g id="panel-c" transform="translate(80 700)">
-    <rect class="panel" x="0" y="0" width="1440" height="230" rx="12"/>
+  <g id="panel-c" transform="translate(80 750)">
+    <rect class="panel" x="0" y="0" width="1440" height="200" rx="12"/>
     <text class="panel-label" x="24" y="40">C</text>
-    <text class="panel-title" x="58" y="40">Optional missed-TU rescue</text>
-    <text class="small" x="58" y="63">Diagnose and rescue are independent post-clustering commands; rescue reruns detection and does not consume the diagnostic report.</text>
+    <text class="panel-title" x="58" y="40">Post-filter reassignment and outputs</text>
+    <text class="small" x="475" y="40">Annotation contributes only after TU discovery.</text>
 
-    <g transform="translate(80 86)">
-      <rect class="box-orange" x="0" y="0" width="240" height="112" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Cluster outputs</text>
-      <text class="small" x="18" y="53">pooled BED6 reads</text>
-      <text class="small" x="18" y="75">existing TU BED</text>
-      <text class="small" x="18" y="97">membership TSV (rescue)</text>
-    </g>
-    <path class="arrow-orange" d="M332 112H418"/>
-    <g transform="translate(430 78)">
-      <rect class="box-orange" x="0" y="0" width="220" height="62" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Diagnose</text>
-      <text class="small" x="18" y="50">detect boundary modes</text>
-    </g>
-    <path class="arrow-orange" d="M662 109H758"/>
-    <g transform="translate(770 78)">
-      <rect class="box" x="0" y="0" width="230" height="62" rx="8"/>
-      <text class="box-title" x="18" y="28">Diagnostic report</text>
-      <text class="small" x="18" y="50">MISS candidates (review only)</text>
+    <g transform="translate(55 72)">
+      <rect class="box" x="0" y="0" width="250" height="102" rx="8"/>
+      <text class="box-title" x="16" y="29">Filter and identify TUs</text>
+      <text class="body" x="16" y="53">optional minimum support</text>
+      <text class="small" x="16" y="75">stable genomic IDs (default)</text>
+      <text class="small" x="16" y="92">or sequential compatibility IDs</text>
     </g>
 
-    <path class="arrow-orange" d="M332 181H418"/>
-    <g transform="translate(430 150)">
-      <rect class="box-orange" x="0" y="0" width="220" height="62" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Rescue</text>
-      <text class="small" x="18" y="50">redetect, deduplicate, compete</text>
+    <path class="arrow" d="M317 123H347"/>
+    <g transform="translate(360 72)">
+      <rect class="box-teal" x="0" y="0" width="270" height="102" rx="8"/>
+      <text class="box-title-teal" x="16" y="29">Re-score every read</text>
+      <text class="body" x="16" y="53">against emitted TU consensuses</text>
+      <text class="small" x="16" y="75">direct span-Jaccard candidate</text>
+      <text class="small" x="16" y="92">or partial attachment-rule candidate</text>
     </g>
-    <path class="arrow-orange" d="M662 181H758"/>
-    <g transform="translate(770 150)">
-      <rect class="box-orange" x="0" y="0" width="230" height="62" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Rescued outputs</text>
-      <text class="small" x="18" y="50">TU BED + membership TSV</text>
+
+    <path class="arrow" d="M642 123H672"/>
+    <g transform="translate(685 72)">
+      <rect class="box-teal" x="0" y="0" width="300" height="102" rx="8"/>
+      <text class="box-title-teal" x="16" y="29">Classify assignment</text>
+      <text class="body" x="16" y="53">unique · partial · ambiguous · unassigned</text>
+      <text class="small" x="16" y="75">best-vs-runner-up score margin</text>
+      <text class="small" x="16" y="92">optional exact fractional weights</text>
     </g>
-    <path class="arrow-orange" d="M1012 181H1138"/>
-    <g transform="translate(1150 150)">
-      <rect class="box-orange" x="0" y="0" width="190" height="62" rx="8"/>
-      <text class="box-title-orange" x="18" y="28">Optional recount</text>
-      <text class="small" x="18" y="50">membership to matrices</text>
+
+    <path class="arrow" d="M997 123H1027"/>
+    <g transform="translate(1040 72)">
+      <rect class="box" x="0" y="0" width="345" height="102" rx="8"/>
+      <text class="box-title" x="16" y="29">Write audited results</text>
+      <text class="body" x="16" y="52">membership v2 + TU/sample/group counts</text>
+      <text class="small" x="16" y="74">endpoint stats + ID map</text>
+      <text class="small" x="16" y="92">optional gene context, semantics, GFF3/BED12, counts</text>
     </g>
   </g>
 
-  <g transform="translate(80 970)">
+  <g id="panel-d" transform="translate(80 980)">
+    <rect class="panel" x="0" y="0" width="1440" height="220" rx="12"/>
+    <text class="panel-label" x="24" y="40">D</text>
+    <text class="panel-title" x="58" y="40">Optional missed-TU review and rescue</text>
+    <text class="small" x="520" y="40">Separate post-clustering commands; run does not invoke them; original outputs remain unchanged.</text>
+
+    <g transform="translate(70 76)">
+      <rect class="box-orange" x="0" y="0" width="250" height="118" rx="8"/>
+      <text class="box-title-orange" x="17" y="29">Clustered inputs</text>
+      <text class="small" x="17" y="53">pooled BED6 reads</text>
+      <text class="small" x="17" y="75">existing TU BED</text>
+      <text class="small" x="17" y="97">membership TSV (rescue only)</text>
+    </g>
+
+    <path class="arrow-orange" d="M332 101H388"/>
+    <g transform="translate(400 70)">
+      <rect class="box-orange" x="0" y="0" width="240" height="64" rx="8"/>
+      <text class="box-title-orange" x="17" y="25">Diagnose</text>
+      <text class="tiny" x="17" y="44">bounded 3′ families</text>
+      <text class="tiny" x="17" y="59">supported 5′ modes</text>
+    </g>
+    <path class="arrow-orange" d="M652 102H708"/>
+    <g transform="translate(720 70)">
+      <rect class="box" x="0" y="0" width="245" height="64" rx="8"/>
+      <text class="box-title" x="17" y="25">Diagnostic report</text>
+      <text class="tiny" x="17" y="44">unrepresented MISS candidates</text>
+      <text class="tiny" x="17" y="59">review only</text>
+    </g>
+
+    <path class="arrow-orange" d="M332 172H388"/>
+    <g transform="translate(400 138)">
+      <rect class="box-orange" x="0" y="0" width="240" height="68" rx="8"/>
+      <text class="box-title-orange" x="17" y="25">Rescue</text>
+      <text class="tiny" x="17" y="45">redetect + deduplicate candidates</text>
+      <text class="tiny" x="17" y="61">move only when boundary fit improves</text>
+    </g>
+    <path class="arrow-orange" d="M652 172H708"/>
+    <g transform="translate(720 138)">
+      <rect class="box-orange" x="0" y="0" width="285" height="68" rx="8"/>
+      <text class="box-title-orange" x="17" y="25">Rescued outputs</text>
+      <text class="tiny" x="17" y="45">TU BED + preserved membership schema</text>
+      <text class="tiny" x="17" y="61">optional counts + candidate reports</text>
+    </g>
+    <path class="arrow-orange-dashed" d="M1017 172H1083"/>
+    <g transform="translate(1095 138)">
+      <rect class="box-orange" x="0" y="0" width="245" height="68" rx="8"/>
+      <text class="box-title-orange" x="17" y="25">Optional recount</text>
+      <text class="tiny" x="17" y="45">rescued membership</text>
+      <text class="tiny" x="17" y="61">→ sample/group count matrices</text>
+    </g>
+  </g>
+
+  <g transform="translate(80 1234)">
     <text class="small" x="0" y="0">Intervals use 0-based, half-open coordinates. BED12 inputs are clustered by outer transcript span only.</text>
   </g>
 </svg>

@@ -113,9 +113,11 @@ pub enum GffParseError {
 
 /// Read `gene` features from a GFF3 file.
 ///
-/// Blank/comment lines are ignored. Every data row must contain exactly nine
-/// tab-separated columns; non-`gene` rows are otherwise skipped. Gene
-/// coordinates are converted from 1-based inclusive to 0-based half-open.
+/// Blank/comment lines are ignored. Parsing stops at the optional `##FASTA`
+/// directive because all following lines belong to the embedded reference
+/// sequences rather than the GFF3 feature table. Every feature row must contain
+/// exactly nine tab-separated columns; non-`gene` rows are otherwise skipped.
+/// Gene coordinates are converted from 1-based inclusive to 0-based half-open.
 ///
 /// # Errors
 ///
@@ -137,6 +139,9 @@ pub fn read_gff3_genes<P: AsRef<Path>>(path: P) -> Result<Vec<GeneRecord>, GffEr
             source,
         })?;
         let line = line.trim();
+        if line == "##FASTA" {
+            break;
+        }
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -455,6 +460,37 @@ mod tests {
         assert_eq!(genes[0].feature_kind, "mRNA");
         assert_eq!(genes[1].id, "b0002");
         assert_eq!(genes[1].feature_kind, "gene");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_gff3_genes_ignores_embedded_fasta_section() {
+        let dir = std::env::temp_dir().join(format!(
+            "trackclustertu_gff_fasta_unit_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prokka.gff");
+        std::fs::write(
+            &path,
+            concat!(
+                "##gff-version 3\n",
+                "contig_1\tProkka\tgene\t11\t50\t.\t+\t.\tID=gene1;locus_tag=TEST_0001\n",
+                "##FASTA\n",
+                ">contig_1\n",
+                "ACGTACGTACGTACGTACGT\n",
+            ),
+        )
+        .unwrap();
+
+        let genes = read_gff3_genes(&path).unwrap();
+        assert_eq!(genes.len(), 1);
+        assert_eq!(genes[0].contig, "contig_1");
+        assert_eq!(genes[0].id, "TEST_0001");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

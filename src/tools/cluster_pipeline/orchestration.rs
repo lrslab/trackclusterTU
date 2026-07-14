@@ -1125,6 +1125,10 @@ fn run_cluster_mode(
         return Ok(());
     }
 
+    eprintln!(
+        "pipeline_stage\tstage=clustering\tstatus=started\treads={}\tthreads={threads}",
+        reads.len()
+    );
     let t_cluster_start = Instant::now();
     let clustering_options = TuClusteringOptions {
         attach_contained_reads: !cli.skip_score2_attachment,
@@ -1151,8 +1155,20 @@ fn run_cluster_mode(
         )
     };
     let t_cluster = t_cluster_start.elapsed();
+    eprintln!(
+        "pipeline_stage\tstage=clustering\tstatus=completed\treads={}\ttus={}\telapsed_seconds={:.3}",
+        reads.len(),
+        result.tus().len(),
+        t_cluster.as_secs_f64()
+    );
 
-    let prepared = prepare_outputs(&result, cli.min_tu_count, cli.tu_id_style);
+    let prepared = prepare_outputs(&result, cli.min_tu_count, cli.tu_id_style)?;
+    eprintln!(
+        "pipeline_stage\tstage=assignment\tstatus=started\treads={}\ttus={}",
+        reads.len(),
+        prepared.tus.len()
+    );
+    let t_assignment_start = Instant::now();
     let assignments = crate::tu::assign_reads_to_tus(
         &reads,
         &prepared.tus,
@@ -1162,6 +1178,13 @@ fn run_cluster_mode(
         cli.ambiguity_margin,
         cli.fractional_assignment,
     )?;
+    let t_assignment = t_assignment_start.elapsed();
+    eprintln!(
+        "pipeline_stage\tstage=assignment\tstatus=completed\treads={}\ttus={}\telapsed_seconds={:.3}",
+        reads.len(),
+        prepared.tus.len(),
+        t_assignment.as_secs_f64()
+    );
     let mut count_metrics = CountMetrics::zeros(prepared.tus.len());
 
     let t_write_tu_start = Instant::now();
@@ -1429,6 +1452,7 @@ fn run_cluster_mode(
             );
         }
         eprintln!("[timings] cluster_tus={t_cluster:?}");
+        eprintln!("[timings] assign_reads_to_tus={t_assignment:?}");
         eprintln!("[timings] write_tu_bed={t_write_tu:?}");
         eprintln!("[timings] write_membership={t_membership:?}");
         eprintln!("[timings] total={:?}", total_start.elapsed());

@@ -32,8 +32,18 @@ Criterion stores historical results under `target/criterion/`.
 
 ### `benches/clustering.rs`
 
-- Synthetic reads on one `(contig=strand)` partition.
-- Each “seed” produces many near-identical full-length reads (high span Jaccard) plus one shorter truncation (exercises the overlap-over-longer second-pass checks).
+- `tu_clustering` spreads reads across disconnected loci, with 100 reads per
+  seed. Each seed produces near-identical full-length reads (high span Jaccard)
+  plus one shorter truncation (exercises the overlap-over-longer second-pass
+  checks).
+- `tu_clustering_dense_hot_locus` keeps 5,000 or 10,000 reads in one
+  overlap-connected locus. It covers both duplicate-heavy alignments and 21
+  variants of endpoint jitter. Compare the 5,000- and 10,000-read estimates:
+  roughly fourfold growth when reads double is a warning that per-family work
+  has become quadratic.
+- `tu_assignment_sparse_index` assigns 10,000 or 20,000 reads against 10,000
+  separated TUs on one reference/strand partition. It guards the spatial index
+  used to avoid the former all-reads-by-all-TUs comparison.
 - Thresholds: span Jaccard `0.95`, overlap over longer `0.99`.
 
 ### `benches/endpoint_modes.rs`
@@ -81,3 +91,20 @@ Initial Criterion estimates:
 - `endpoint_modes/5000`: 10.070–10.244 ms
 
 A complete Criterion process measured with `/usr/bin/time -l` used a maximum resident set size of 34,324,480 bytes (32.7 MiB). A second concurrently loaded 5,000-endpoint sample was noisy (10.792–18.286 ms), so release comparisons must use one warm-up, three isolated measured repeats, retained raw logs, and medians from the same hardware.
+
+## Clustering and assignment scalability baseline (2026-07-14)
+
+Environment: the same Apple M1 Max system above (`rustc 1.90.0`, 10 logical
+CPUs, 64 GiB RAM). Criterion sample size was 10.
+
+- `identical/5000`: 1.999–2.034 ms
+- `identical/10000`: 3.978–4.013 ms
+- `jittered/5000`: 2.785–2.809 ms
+- `jittered/10000`: 5.555–5.602 ms
+- `tu_assignment_sparse_index/reads/10000`: 4.177–4.273 ms
+- `tu_assignment_sparse_index/reads/20000`: 5.233–5.584 ms
+
+Doubling the number of reads took about 2x for both dense-clustering cases. The v0.2.0
+implementation took about 0.98 s at 8,000 duplicate-heavy reads, 3.72 s at
+16,000, and 15.63 s at 32,000 in a direct one-thread CLI measurement, showing
+the former approximately quadratic curve.
