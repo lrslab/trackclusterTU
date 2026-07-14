@@ -13,17 +13,26 @@ the workflow in `.github/workflows/release.yml`.
 3. Run the local release checks:
 
    ```bash
-   cargo fmt --all -- --check
-   cargo clippy --locked --all-targets --all-features -- -D warnings
-   cargo test --locked --all-targets --all-features
+   rustup toolchain install 1.97.0 --profile minimal \
+     --component rustfmt --component clippy
+   rustup toolchain install 1.88.0 --profile minimal
+   cargo +1.97.0 install cargo-audit --locked --version 0.22.2
+
+   cargo +1.97.0 fmt --all -- --check
+   cargo +1.97.0 clippy --locked --all-targets --all-features -- -D warnings
+   cargo +1.97.0 test --locked --all-targets --all-features
    RUSTDOCFLAGS="-D warnings -D missing_docs" \
-     cargo doc --locked --no-deps --all-features
-   cargo test --locked --doc --all-features
+     cargo +1.97.0 doc --locked --no-deps --all-features
+   cargo +1.97.0 test --locked --doc --all-features
    cargo +1.88.0 test --locked --lib
-   cargo audit --deny warnings
-   cargo package --locked
-   cargo build --release --locked --bin trackclustertu
+   cargo +1.97.0 audit --deny warnings
+   cargo +1.97.0 package --locked
+   cargo +1.97.0 build --release --locked --bin trackclustertu
    ```
+
+   These versions match the tagged-release workflow. Installing an unpinned
+   `cargo-audit` or running the unqualified default toolchain does not reproduce
+   the release gate.
 
    `cargo package` is a source-completeness check only. Its `.crate` output is
    not uploaded or published.
@@ -31,7 +40,7 @@ the workflow in `.github/workflows/release.yml`.
 4. Verify the local binary and intended tag:
 
    ```bash
-   version="$(cargo pkgid --locked | sed 's/.*@//')"
+   version="$(cargo +1.97.0 pkgid --locked | sed 's/.*@//')"
    tag="v${version}"
    test "$(./target/release/trackclustertu --version)" = \
      "trackclustertu ${version}"
@@ -45,7 +54,7 @@ Commit and push the reviewed release candidate before creating the tag. Then
 create an annotated tag on that exact commit:
 
 ```bash
-version="$(cargo pkgid --locked | sed 's/.*@//')"
+version="$(cargo +1.97.0 pkgid --locked | sed 's/.*@//')"
 tag="v${version}"
 git tag -a "$tag" -m "trackclusterTU ${tag}"
 test "$(git rev-parse "${tag}^{}")" = "$(git rev-parse HEAD)"
@@ -56,7 +65,9 @@ The workflow rejects a tag that does not match the Cargo package version. It
 runs the release gate, builds all supported targets, creates one `SHA256SUMS`
 manifest, and publishes the GitHub release automatically. Each build receives
 the tag commit through `TRACKCLUSTERTU_GIT_REVISION`; the smoke test rejects a
-binary that does not embed that exact revision for `run_manifest.json`.
+binary that does not contain those exact revision bytes. `run_manifest.json`
+reads the same embedded compile-time value, but the release smoke test does not
+generate or inspect a manifest.
 
 ## Verify the published release
 

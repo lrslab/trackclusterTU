@@ -65,6 +65,9 @@ struct RunCli {
     out_dir: PathBuf,
 
     /// Number of worker threads to use (default: all logical CPUs).
+    ///
+    /// Mapping totals of at least two are split between minimap2 and samtools sort.
+    /// A requested total of one still assigns one thread to each of those two stages.
     #[arg(long)]
     threads: Option<usize>,
 
@@ -139,7 +142,7 @@ struct RunCli {
     #[arg(long)]
     min_read_len: Option<u32>,
 
-    /// Optional minimum reads per TU (filters outputs).
+    /// Minimum pre-assignment clustering-family support required to emit a TU.
     #[arg(long)]
     min_tu_count: Option<u64>,
 
@@ -192,6 +195,9 @@ struct MapCli {
     out_dir: PathBuf,
 
     /// Number of worker threads to use (default: all logical CPUs).
+    ///
+    /// Mapping totals of at least two are split between minimap2 and samtools sort.
+    /// A requested total of one still assigns one thread to each of those two stages.
     #[arg(long)]
     threads: Option<usize>,
 
@@ -233,7 +239,12 @@ struct MapCli {
 #[command(
     name = "trackclustertu bam-to-bed",
     version,
-    about = "Convert BAM input(s) to BED6 with optional evidence and pre-clustering filters"
+    about = "Convert BAM input(s) to BED6 with optional evidence and pre-clustering filters",
+    group(
+        clap::ArgGroup::new("input_mode")
+            .required(true)
+            .args(["input_bam", "manifest"])
+    )
 )]
 struct BamToBedCli {
     /// Single input BAM file.
@@ -278,8 +289,9 @@ struct BamToBedCli {
     /// Library chemistry used to interpret optional full-length evidence.
     ///
     /// direct-rna infers full length from poly(A)+5' adapter evidence; direct-cdna and
-    /// pcr-cdna infer it from 5'+3' adapter evidence. Inference is only used when
-    /// --require-full-length is set, so the default BED6 behavior is unchanged.
+    /// pcr-cdna infer it from 5'+3' adapter evidence. The selected profile and inferred
+    /// effective_full_length state are recorded in any emitted evidence regardless of
+    /// --require-full-length. Only that flag uses the state to filter BED6 records.
     #[arg(long, default_value = "direct-rna")]
     library_profile: crate::bam::LibraryProfile,
 
@@ -1010,8 +1022,12 @@ where
     let cli = GffToBedCli::parse_from(args);
     let transaction = OutputTransaction::new([&cli.annotation_gff], [&cli.out_bed])?;
     let staged_bed = transaction.staged_path(&cli.out_bed)?;
-    crate::tools::gff_to_bed::convert_gff_to_bed(&cli.annotation_gff, &staged_bed)?;
-    transaction.commit()
+    let gene_count =
+        crate::tools::gff_to_bed::convert_gff_to_bed(&cli.annotation_gff, &staged_bed)?;
+    transaction.commit()?;
+    println!("genes={gene_count}");
+    println!("out_bed={}", cli.out_bed.display());
+    Ok(())
 }
 
 fn run_full_pipeline(config: &RunConfig) -> Result<()> {
@@ -1038,7 +1054,9 @@ fn run_full_pipeline(config: &RunConfig) -> Result<()> {
         (Some(path), None) => Some(path.clone()),
         (None, Some(gff)) => {
             let out_bed = config.map.out_dir.join("annotation.bed");
-            crate::tools::gff_to_bed::convert_gff_to_bed(gff, &out_bed)?;
+            let gene_count = crate::tools::gff_to_bed::convert_gff_to_bed(gff, &out_bed)?;
+            println!("genes={gene_count}");
+            println!("out_bed={}", out_bed.display());
             Some(
                 out_bed
                     .canonicalize()

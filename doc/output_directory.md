@@ -44,14 +44,17 @@ quarantined, its reason is recorded, and parsing continues with the next
 record. Duplicate IDs quarantine every occurrence within the same input/sample
 instead of selecting one by input order. An entirely rejected sample remains a
 zero-count sample, and an entirely rejected input produces a valid empty output
-set plus the rejection report. `--strict-read-errors` converts any recorded read
-rejection into a command error. Input/manifest structure and I/O failures,
-output failures, and cross-output invariants are never downgraded.
+set plus the rejection report. `--strict-read-errors` evaluates the input,
+then converts any accumulated read rejection into a command error before the
+output set is published; it is atomic failure-on-any-rejection, not a promise
+to stop decoding at the first bad record. Input/manifest structure and I/O
+failures, output failures, and cross-output invariants are never downgraded.
 
 When `--manifest` is used, `trackclustertu cluster` can also write:
 
 - `*.pooled.bed` (BED6): pooled reads used for clustering
   - read IDs are rewritten as `<sample>::<read_id>`
+  - `::` is the reserved sample/read separator, so manifest sample names cannot contain it
 - `*.tu_sample_long.tsv` (TSV): one row per non-zero `(tu_id, sample)` pair
   - columns: `tu_id  sample  unique_count  full_length_evidence_count  total_count  fractional_count`
 - `*.tu_sample_matrix.tsv` (TSV): TU-by-sample count matrix
@@ -62,13 +65,19 @@ When `--manifest` is used, `trackclustertu cluster` can also write:
 
 Assignment status and count behavior are explicit:
 
-- `unique`: one hard TU; contributes one to `unique_count` and `total_count`.
-- `partial`: one qualifying contained/partial hard TU; contributes to `total_count`, not `unique_count`.
+- `unique`: one hard TU; contributes one to `unique_count`, `total_count`, and `fractional_count`.
+- `partial`: one qualifying contained/partial hard TU; contributes one to `total_count` and `fractional_count`, but not `unique_count`.
 - `ambiguous`: no hard TU (`tu_id=.`). With `--fractional-assignment`, its exactly normalized weight is propagated to each candidate's `fractional_count`; without that flag it contributes to no TU count.
 - `unassigned`: no hard or fractional contribution.
 - `full_length_evidence_count` is incremented only for a hard-assigned read whose manifest points to a matching `trackclustertu.bam-evidence.v1` sidecar and whose `effective_full_length` value is true; raw BED input is never labeled full-length by assumption.
 
-The same rules are applied independently to TU, sample, group, and downstream gene matrices. Therefore a sample/group `total_count` is a hard-assignment count, while `fractional_count` is the ambiguity-aware quantity to use when fractional assignment is enabled.
+The same rules are applied independently to TU, sample, group, and downstream gene matrices. Therefore `fractional_count` always includes weight `1` for every hard assignment and, when fractional assignment is enabled, also includes ambiguous fractional weights. A sample/group `total_count` remains the hard-assignment count.
+
+`--min-tu-count` is evaluated at different stages for the two relevant
+workflows. `cluster` and `run` retain a TU when its pre-assignment clustering
+family has at least that many members. `recount` has no clustering families, so
+it retains a row when the summed final hard `total_count` reaches the threshold;
+fractional-only support does not satisfy it.
 
 If `--annotation-bed` is provided, it can also write:
 
@@ -80,9 +89,10 @@ If `--annotation-bed` is provided, it can also write:
   - criteria are embedded as metadata: same-context shared 3-prime/different 5-prime for `alternative_start`; same-context shared 5-prime/different 3-prime for `alternative_termination`; two or more same-strand genes for `readthrough`; opposite-strand overlap for `antisense`; no qualifying relationship for `intergenic`; and strict same-context containment with both boundaries internal for `probable_processing_product`
 - `*.tus.gff3` (GFF3): 1-based inclusive `transcript` features plus child `gene_overlap` relationship features linked with `Parent`
   - sequence IDs and attributes are UTF-8 byte percent-escaped where required by GFF3
-- `*.tus.anchored.bed12` (BED12 + extra columns): TU “blocks” clipped to overlapping genes
+- `*.tus.anchored.bed12` (BED12 + extra columns): TU blocks clipped to qualifying same-strand genes
   - extra column `name2`: comma-separated member read IDs, with `|<read_count>` suffix
-  - extra column `gene_list`: comma-separated overlapping gene IDs (or `.`)
+  - extra column `gene_list`: comma-separated qualifying same-strand gene IDs
+  - when there is no qualifying same-strand gene, the record has one full-TU block and `gene_list=.`; antisense-only relationships do not create blocks or gene-list entries
 - `*.gene_count.csv` (CSV): gene counts table
   - same metric columns as TU counts: compatibility `count`, unique, full-length-evidence, hard total, and fractional
 - `*.gene_sample_matrix.tsv` (TSV): gene-by-sample count matrix
@@ -171,8 +181,9 @@ rankings, ambiguity/fractional weights, and full-length-evidence flag. A
 promoted v2 row is rewritten as a canonical 20-column v2 `unique` hard
 assignment to its rescued TU; its prior candidate ranking is replaced because
 rescue has adjudicated that assignment, while its full-length-evidence flag is
-retained. A homogeneous output declares its one layout with `#columns`. A
-heterogeneous output declares the widths actually present with
+retained. A homogeneous v2-bearing output declares its one layout with
+`#columns`; a homogeneous legacy-only output does not gain a synthesized schema
+header. A heterogeneous output declares the widths actually present with
 `#row_widths=4,6,20` (omitting absent widths) and the applicable
 `#legacy_columns`, `#compatible_v2_columns`, and `#canonical_v2_columns`
 declarations. `#contains_legacy_rows=true` and
@@ -224,14 +235,20 @@ references it, but an existing TU absent from every membership field cannot
 appear in recount outputs even if it is retained in `rescued.tus.bed` and the
 two-column rescue count sidecar.
 
-With `--out-dir`, the default outputs are:
+Recount assigns all of the following output paths automatically. `--out-dir`
+places defaults in the named directory; if it is omitted, the manifest-derived
+default directory described below is used. Individual `--out-*` options
+override their corresponding paths, so no explicit output option is required.
 
 - `tu_count.csv`
 - `tu_sample_long.tsv`
 - `tu_sample_matrix.tsv`
-- `tu_group_matrix.tsv`
+- `tu_group_matrix.tsv` when the manifest has a non-empty `group` column
 
-At least one of these count outputs must be requested, either explicitly or through `--out-dir`.
+For four-column legacy membership, each hard-assignment row is projected as
+`count=total_count=1`, `fractional_count=1`, `unique_count=0`, and
+`full_length_evidence_count=0`. The legacy schema cannot establish uniqueness
+or full-length evidence.
 
 ## Mapping outputs (from `trackclustertu map`)
 
@@ -268,7 +285,16 @@ Mapping always supplies minimap2 with `-ax map-ont`. It then appends repeatable 
 - BED6 outputs such as `bed/<sample>.bed` and `pooled.bed` use:
   `chrom  start  end  name  score  strand`
 - Cluster-generated membership TSV keeps `read_id  tu_id  score1  score2` as its first four compatibility columns (`score1` = span Jaccard; `score2` = overlap over longer) and appends the canonical v2 audit fields described above. Rescue may preserve legacy rows, earlier six-column v2 rows, or mixed compatibility rows from its input; consult that file's metadata and per-row schema field.
-- In pooled mode, membership read IDs are tagged as `<sample>::<read_id>`
+- In pooled mode, membership read IDs are tagged as `<sample>::<read_id>`; `::` is reserved and is rejected in manifest sample names
+
+`cluster --format auto` is the default. Suffix matching is case-insensitive:
+`.bed12` selects BED12, `.bed` selects BED6, and `.tsv` or `.txt` selects TSV.
+FASTQ suffixes (`.fastq`, `.fq`, `.fastq.gz`, and `.fq.gz`) are recognized so
+that `cluster` can direct the user to `map` or `run`, but FASTQ is not a direct
+cluster input. Unrecognized suffixes fall back to BED6. In manifest mode,
+recognized suffixes must all infer the same format; conflicting formats fail.
+Passing `--format` explicitly applies one parser to every manifest row rather
+than enabling heterogeneous per-row formats.
 
 ## Default output directories
 

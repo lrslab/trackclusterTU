@@ -685,7 +685,7 @@ fn invalid_same_id_rows_do_not_remove_valid_rescue_read_or_break_tu_membership()
 }
 
 #[test]
-fn strict_read_errors_preserves_fail_fast_duplicate_behavior() {
+fn strict_read_errors_rejects_duplicate_records_atomically() {
     let fixture = fixture(
         "strict_duplicate_read",
         concat!("chr1\t100\t210\tr1\t0\t+\n", "chr1\t102\t210\tr1\t0\t+\n",),

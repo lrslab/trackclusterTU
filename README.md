@@ -61,15 +61,16 @@ Prebuilt release tarballs are published from GitHub Actions on tagged releases:
 - Releases: [lrslab/trackclusterTU/releases](https://github.com/lrslab/trackclusterTU/releases)
 - Release tag for this version: `v0.2.1`
 - Archive naming: `trackclustertu-v0.2.1-<target>.tar.gz`
-- Optional checksum manifest: `SHA256SUMS`
+- Required checksum manifest: `SHA256SUMS`
 
 Each archive contains the `trackclustertu` executable, `LICENSE`, and `README.md`.
 The release workflow builds `x86_64-unknown-linux-musl`,
 `aarch64-unknown-linux-gnu`, and `aarch64-apple-darwin` archives. Download the
 archive for your target, extract it, and place `trackclustertu` somewhere on
-your `PATH`. For optional integrity verification, compare `sha256sum <archive>`
-on Linux or `shasum -a 256 <archive>` on macOS with the matching line in
-`SHA256SUMS`.
+your `PATH`. Before using the binary, verify the archive against the required
+`SHA256SUMS` release asset: calculate it with `sha256sum <archive>` on Linux or
+`shasum -a 256 <archive>` on macOS and compare it with the matching manifest
+entry.
 
 ### Option 2: Clone And Build From Source
 
@@ -139,7 +140,7 @@ trackclustertu cluster \
   --out-dir results
 ```
 
-Cluster membership uses the versioned v2 schema. Equal or near-equal biological evidence is reported as `ambiguous`, never silently resolved by TU identifier text. `--ambiguity-margin` controls the score margin (default `0.02`); `--fractional-assignment` divides each ambiguous read across qualifying candidates with weights that sum exactly to `1.0`. Count files distinguish unique, full-length-evidence, hard total, and fractional counts. See [`doc/output_directory.md`](doc/output_directory.md) for the exact columns and sample/group semantics.
+Cluster membership uses the versioned v2 schema. Equal or near-equal biological evidence is reported as `ambiguous`, never silently resolved by TU identifier text. `--ambiguity-margin` controls the score margin (default `0.02`); `--fractional-assignment` divides each ambiguous read across qualifying candidates with weights that sum exactly to `1.0`. Every hard `unique` or `partial` assignment contributes weight `1` to `fractional_count`; enabled ambiguous fractions are added to those hard weights. Count files distinguish unique, full-length-evidence, hard total, and fractional counts. See [`doc/output_directory.md`](doc/output_directory.md) for the exact columns and sample/group semantics.
 
 With `--annotation-bed`, gene relationships require at least one overlapping base by default. Tighten that policy with `--gene-min-overlap-bp`, `--gene-min-tu-fraction`, and `--gene-min-gene-fraction`. `tu_semantics.tsv` records same-strand genes in transcription direction and deterministic multi-label classifications:
 
@@ -152,7 +153,7 @@ With `--annotation-bed`, gene relationships require at least one overlapping bas
 
 Labels are emitted in that fixed order and may coexist; a TU with none is `canonical`. `tus.gff3` contains 1-based GFF3 transcript features and child `gene_overlap` relationships. TU IDs are coordinate-derived by default (`TUg_<hex-contig>_<start>_<end>_<p|m>`), so filtering another TU does not renumber them. Coordinate-identical final consensus families are coalesced before IDs are assigned, making these stable IDs unique within a run. Use `--tu-id-style sequential` for the historical serial IDs; `tu_id_map.tsv` always makes emitted, stable, and sequential identities auditable.
 
-Gene counts are deliberately nonexclusive: one polycistronic/readthrough TU contributes its complete assignment weight to every qualifying same-strand gene. Consequently, summed gene counts can exceed read and TU totals. Antisense relationships are reported but are not added to gene counts; each gene count file/matrix carries this policy in `#count_semantics` metadata.
+Gene counts are deliberately nonexclusive: one polycistronic/readthrough TU contributes its complete assignment weight to every qualifying same-strand gene. Consequently, summed gene counts can exceed read and TU totals. Antisense relationships are reported but are not added to gene counts; each gene count file/matrix carries this policy in `#count_semantics` metadata. In `tus.anchored.bed12`, blocks and `gene_list` use only qualifying same-strand genes. A TU with no such gene is emitted as one full-TU block with `gene_list=.` even if it has an antisense relationship.
 
 ```bash
 trackclustertu cluster \
@@ -168,6 +169,12 @@ trackclustertu recount \
   --pooled-membership results/membership.tsv \
   --out-dir recount_results
 ```
+
+`recount` needs no individual output options. It defaults `tu_count.csv`,
+`tu_sample_long.tsv`, and `tu_sample_matrix.tsv` into `--out-dir`, plus
+`tu_group_matrix.tsv` when groups exist; individual `--out-*` options override
+those paths. If `--out-dir` is also omitted, it uses the manifest-derived
+`<manifest-stem>.trackclustertu/` directory.
 
 ```bash
 trackclustertu gff-to-bed \
@@ -237,7 +244,8 @@ fractional, and full-length-evidence fields, while promoted v2 rows become
 canonical `unique` assignments to the rescued TU and retain their
 full-length-evidence flag. Mixed legacy/v2 input and the earlier six-column v2
 form are accepted; untouched rows keep their original representation and
-width. Homogeneous output uses `#columns`; heterogeneous output uses
+width. Homogeneous v2-bearing output uses `#columns`; homogeneous legacy-only
+output does not gain a synthesized schema header. Heterogeneous output uses
 `#row_widths` plus width-specific column declarations and explicit legacy/short
 v2 presence flags. For v2-bearing output, `#rescue_*` metadata records the
 unchanged-row, promoted-row, and hard-count semantics. Reads quarantined during
@@ -343,6 +351,8 @@ sampleB	treated	data/sampleB.fastq.gz
 - `group` is optional
 
 Relative `reads` paths are resolved relative to the manifest file.
+The separator `::` is reserved for pooled read IDs, so a `sample` value cannot
+contain `::`; pooled membership IDs are written as `<sample>::<read_id>`.
 Sample names must remain unique after replacing non-filename characters with `_`, because output BAM/BED/log filenames are derived from them.
 
 ### Step 2: Run The Whole Pipeline
@@ -398,11 +408,10 @@ trackclustertu map \
   --out-dir mapped
 ```
 
-```bash
-trackclustertu bam-to-bed \
-  --manifest mapped/samples.bam.tsv \
-  --out-dir mapped
-```
+`map` already converts its sorted BAMs to BED6 and writes
+`mapped/samples.bed.tsv`. Use `bam-to-bed` separately only when you need to
+reconvert an existing BAM manifest with different conversion or evidence
+options.
 
 ```bash
 trackclustertu gff-to-bed \
@@ -432,14 +441,17 @@ duplicate read IDs, zero-length reads, and reads below `--min-read-len` are
 excluded while later records continue. Full details are written atomically to
 `read_rejections.tsv`, and a deterministic `read_input_counts` summary is
 printed to stderr. Use `--out-read-rejections` to override the report path or
-`--strict-read-errors` when a quality-control workflow should fail if any read
-is rejected. File/manifest structure and I/O errors, output failures, and
+`--strict-read-errors` when a quality-control workflow should fail atomically
+if any read is rejected. Strict mode evaluates the input and fails before
+publishing the output set; it does not promise to stop decoding at the first
+bad record. File/manifest structure and I/O errors, output failures, and
 internal consistency failures remain fatal.
 
-For non-empty inputs, clustering and read assignment report structured
-`pipeline_stage` start/completion lines to stderr, including the read/TU counts
-and completed-stage elapsed time. These phase boundaries remain visible without
-`--timings`; use `--timings` for the full end-of-run timing breakdown.
+For inputs with at least one retained read, clustering and read assignment
+report structured `pipeline_stage` start/completion lines to stderr, including
+retained-read/TU counts and completed-stage elapsed time. These phase boundaries
+remain visible without `--timings`; use `--timings` for the full end-of-run
+timing breakdown.
 
 ```bash
 trackclustertu recount \
@@ -473,7 +485,7 @@ trackclustertu rescue-missed-tus \
 ```
 
 For updated sample/group matrices after rescue, recount from `rescue/rescued.membership.tsv`.
-For membership-v2 input, recount preserves unchanged ambiguous/fractional contributions; only reads actually promoted by rescue become canonical unique assignments. Legacy input remains legacy.
+For membership-v2 input, recount preserves unchanged ambiguous/fractional contributions; only reads actually promoted by rescue become canonical unique assignments. A four-column legacy hard-assignment row is projected as `count=total_count=1`, `fractional_count=1`, `unique_count=0`, and `full_length_evidence_count=0` because the legacy schema cannot establish uniqueness or full-length evidence.
 
 ## Main Outputs
 
@@ -501,3 +513,12 @@ For membership-v2 input, recount preserves unchanged ambiguous/fractional contri
 - `bed6`: `chrom  start  end  name  score  strand`
 - `bed12`: transcript span `[tx_start, tx_end)` is used for TU clustering; BED12 block structure is ignored by clustering
 - `tsv`: `contig  start  end  id  strand`
+
+`--format auto` is the default. Filename matching is case-insensitive:
+`.bed12` selects BED12, `.bed` selects BED6, and `.tsv` or `.txt` selects TSV.
+FASTQ suffixes (`.fastq`, `.fq`, and their `.gz` forms) are recognized only to
+report that FASTQ must go through `map` or `run`; `cluster` does not read FASTQ
+directly. An unrecognized suffix falls back to BED6. In manifest mode, all
+recognized suffixes must infer the same format; conflicting inferred formats
+are rejected. An explicit `--format` selects one parser for every manifest row
+and does not enable heterogeneous per-row formats.

@@ -451,6 +451,63 @@ fn trackclustertu_clusters_and_writes_outputs() {
 }
 
 #[test]
+fn cluster_coalesces_identical_final_consensus_before_stable_id_output() {
+    let tmp = unique_tmp_dir("trackclustertu_coalesced_stable_ids");
+    fs::create_dir_all(&tmp).unwrap();
+    let input_path = tmp.join("reads.bed");
+    let out_dir = tmp.join("results");
+    fs::write(
+        &input_path,
+        concat!(
+            "chr1\t10\t60\tr0\t0\t+\n",
+            "chr1\t0\t70\tr1\t0\t+\n",
+            "chr1\t0\t60\tr2\t0\t+\n",
+            "chr1\t0\t60\tr3\t0\t+\n",
+            "chr1\t0\t30\tr4\t0\t+\n",
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_trackclustertu"))
+        .args([
+            "cluster",
+            "--in",
+            input_path.to_str().unwrap(),
+            "--format",
+            "bed6",
+            "--span-jaccard-threshold",
+            "0.5",
+            "--overlap-over-longer-threshold",
+            "0.5",
+            "--three-prime-tolerance-bp",
+            "20",
+            "--max-5p-delta",
+            "20",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(out_dir.join("tus.bed")).unwrap(),
+        "chr1\t0\t60\tTUg_63687231_0_60_p\t0\t+\n"
+    );
+    let endpoint_stats = fs::read_to_string(out_dir.join("tu_endpoint_stats.tsv")).unwrap();
+    assert!(endpoint_stats
+        .lines()
+        .any(|line| { line.starts_with("TUg_63687231_0_60_p\t5\t0\t60\t") }));
+
+    let _ = fs::remove_dir_all(tmp);
+}
+
+#[test]
 fn trackclustertu_can_skip_score2_attachment() {
     let tmp = unique_tmp_dir("trackclustertu_test_skip_score2");
     fs::create_dir_all(&tmp).unwrap();
@@ -926,6 +983,7 @@ fn trackclustertu_cluster_help_hides_recount_only_and_fastq_options() {
 
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("Cluster bacterial directRNA reads"));
+    assert!(help.contains("<--in <INPUT>|--manifest <MANIFEST>>"));
     assert!(help.contains("--three-prime-tolerance-bp"));
     assert!(help.contains("--max-5p-delta"));
     assert!(help.contains("--span-jaccard-threshold"));
@@ -944,6 +1002,10 @@ fn trackclustertu_cluster_help_hides_recount_only_and_fastq_options() {
     assert!(help.contains("--gene-min-gene-fraction"));
     assert!(help.contains("--out-tu-semantics"));
     assert!(help.contains("--out-tu-gff3"));
+    assert!(help.contains("Minimum pre-assignment clustering-family support required to emit a TU"));
+    assert!(help.contains("Fail atomically if any read is rejected; no output set is published"));
+    assert!(help.contains("qualifying same-strand genes"));
+    assert!(help.contains("whole TU span is emitted as one block"));
     assert!(!help.contains("--pooled-membership"));
     assert!(!help.contains("fastq"));
 }
@@ -966,6 +1028,7 @@ fn trackclustertu_run_help_shows_canonical_score_flags_and_compatibility_aliases
     assert!(help.contains("--score2-threshold"));
     assert!(help.contains("--skip-overlap-over-longer-attachment"));
     assert!(help.contains("--skip-score2-attachment"));
+    assert!(help.contains("Minimum pre-assignment clustering-family support required to emit a TU"));
 }
 
 #[test]
@@ -987,6 +1050,8 @@ fn trackclustertu_recount_help_is_count_only() {
     assert!(help.contains("Recompute TU count tables"));
     assert!(help.contains("--pooled-membership"));
     assert!(help.contains("--out-tu-count"));
+    assert!(help.contains("Minimum total hard-assignment count required to retain a TU row"));
+    assert!(help.contains("Fractional-only contributions do not satisfy this threshold"));
     assert!(!help.contains("--in <"));
     assert!(!help.contains("--annotation-bed"));
     assert!(!help.contains("--span-jaccard-threshold"));
@@ -1030,6 +1095,25 @@ fn trackclustertu_rescue_help_exposes_documented_defaults() {
         help.contains("Defaults to `--three-prime-window-bp`"),
         "help:\n{help}"
     );
+    assert!(help.contains("Fail atomically if any read is rejected; no output set is published"));
+}
+
+#[test]
+fn trackclustertu_bam_to_bed_help_requires_an_input_mode_and_explains_library_profile() {
+    let output = Command::new(env!("CARGO_BIN_EXE_trackclustertu"))
+        .args(["bam-to-bed", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let help = String::from_utf8_lossy(&output.stdout);
+    assert!(help.contains("<--in-bam <INPUT_BAM>|--manifest <MANIFEST>>"));
+    assert!(help.contains("recorded in any emitted evidence regardless of --require-full-length"));
+    assert!(help.contains("Only that flag uses the state to filter BED6 records"));
 }
 
 #[test]

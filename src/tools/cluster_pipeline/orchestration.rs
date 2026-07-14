@@ -44,7 +44,12 @@ use crate::tu::{AssignmentStatus, TuClusteringOptions};
 #[command(
     name = "trackclustertu cluster",
     version,
-    about = "Cluster bacterial directRNA reads into transcript units (TUs)"
+    about = "Cluster bacterial directRNA reads into transcript units (TUs)",
+    group(
+        clap::ArgGroup::new("input_mode")
+            .required(true)
+            .args(["input", "manifest"])
+    )
 )]
 struct ClusterCli {
     /// Single input reads file path.
@@ -119,7 +124,7 @@ struct ClusterCli {
     #[arg(long)]
     out_read_rejections: Option<PathBuf>,
 
-    /// Stop when any individual read is rejected instead of recording and continuing.
+    /// Fail atomically if any read is rejected; no output set is published.
     #[arg(long)]
     strict_read_errors: bool,
 
@@ -161,7 +166,7 @@ struct ClusterCli {
     #[arg(long, requires = "manifest")]
     out_tu_group_count_matrix: Option<PathBuf>,
 
-    /// Optional minimum reads per TU (filters outputs).
+    /// Minimum pre-assignment clustering-family support required to emit a TU.
     #[arg(long)]
     min_tu_count: Option<u64>,
 
@@ -193,11 +198,14 @@ struct ClusterCli {
     #[arg(long, requires = "annotation_bed")]
     out_tu_gff3: Option<PathBuf>,
 
-    /// Optional TU BED12 output, with blocks clipped to overlapping annotated genes.
+    /// Optional TU BED12 output anchored to qualifying same-strand genes.
+    ///
+    /// Blocks are clipped to same-strand gene intersections. When none qualify, the whole TU
+    /// span is emitted as one block.
     ///
     /// Adds extra columns:
     /// - name2: comma-separated subreads, with `|<read_count>` suffix (TrackCluster-style)
-    /// - gene_list: comma-separated overlapping genes (or '.')
+    /// - gene_list: comma-separated qualifying same-strand genes (or '.')
     #[arg(long, requires = "annotation_bed")]
     out_tu_bed12: Option<PathBuf>,
 
@@ -259,7 +267,9 @@ struct RecountCli {
     #[arg(long)]
     out_tu_group_count_matrix: Option<PathBuf>,
 
-    /// Optional minimum reads per TU (filters outputs).
+    /// Minimum total hard-assignment count required to retain a TU row.
+    ///
+    /// Fractional-only contributions do not satisfy this threshold.
     #[arg(long)]
     min_tu_count: Option<u64>,
 

@@ -51,7 +51,7 @@ struct DiagnoseMissedTusCli {
     #[arg(long = "out-read-rejections")]
     out_read_rejections: Option<PathBuf>,
 
-    /// Stop when any individual read is rejected instead of recording and continuing.
+    /// Fail atomically if any read is rejected; no output set is published.
     #[arg(long = "strict-read-errors")]
     strict_read_errors: bool,
 
@@ -140,7 +140,7 @@ struct RescueMissedTusCli {
     #[arg(long = "out-read-rejections")]
     out_read_rejections: Option<PathBuf>,
 
-    /// Stop when any individual read is rejected instead of recording and continuing.
+    /// Fail atomically if any read is rejected; no output set is published.
     #[arg(long = "strict-read-errors")]
     strict_read_errors: bool,
 

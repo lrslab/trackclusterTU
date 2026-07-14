@@ -2255,6 +2255,39 @@ mod tests {
     }
 
     #[test]
+    fn public_clustering_coalesces_coordinate_identical_final_families() {
+        // These reads split into two anchor-bounded final families whose endpoint
+        // modes both converge on [0, 60). The public result must merge them before
+        // IDs, assignments, or output records are derived.
+        let reads = vec![
+            read("chr", Strand::Plus, 10, 60, "r0"),
+            read("chr", Strand::Plus, 0, 70, "r1"),
+            read("chr", Strand::Plus, 0, 60, "r2"),
+            read("chr", Strand::Plus, 0, 60, "r3"),
+            read("chr", Strand::Plus, 0, 30, "r4"),
+        ];
+        let result = cluster_tus_with_options(
+            &reads,
+            0.5,
+            0.5,
+            TuClusteringOptions {
+                attach_contained_reads: true,
+                three_prime_tolerance_bp: 20,
+                max_five_prime_delta_bp: Some(20),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.tus().len(), 1);
+        assert_eq!(
+            result.tus()[0].interval,
+            Interval::new(Coord::new(0), Coord::new(60)).unwrap()
+        );
+        assert_eq!(result.endpoint_stats()[0].support, reads.len());
+        assert!(result.read_to_tu().iter().all(|&tu_index| tu_index == 0));
+    }
+
+    #[test]
     fn exact_assignment_tie_is_ambiguous_not_lexically_resolved() {
         let reads = vec![read("chr", Strand::Plus, 5, 105, "query")];
         let tus = vec![

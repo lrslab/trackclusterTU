@@ -23,6 +23,13 @@ cargo bench --bench endpoint_modes
 
 Criterion stores historical results under `target/criterion/`.
 
+That local build directory is not a durable release record. The raw logs and
+exact invocations behind the historical figures below are not tracked in this
+repository, so treat them as descriptive reference points rather than release
+gates. For a new release comparison, record the commit, exact command, thread
+settings, hardware, operating system, and toolchain, and retain the raw
+Criterion and wall-time/RSS logs with the external release record.
+
 ## Benchmark setup
 
 ### `benches/intersection.rs`
@@ -44,14 +51,16 @@ Criterion stores historical results under `target/criterion/`.
 - `tu_assignment_sparse_index` assigns 10,000 or 20,000 reads against 10,000
   separated TUs on one reference/strand partition. It guards the spatial index
   used to avoid the former all-reads-by-all-TUs comparison.
-- Thresholds: span Jaccard `0.95`, overlap over longer `0.99`.
+- The two clustering suites use span Jaccard `0.95` and overlap over longer
+  `0.99`. The sparse-assignment suite uses `0.95` and the CLI-default `0.80`.
 
 ### `benches/endpoint_modes.rs`
 
 - High-depth loci with 1,000, 2,500, and 5,000 distinct endpoint coordinates.
 - Three molecules occur at every coordinate and a centered 12 bp mode window is used.
 - The indexed implementation has O(k² log k) worst-case complexity for k distinct endpoints, replacing the previous cubic repeated rescans.
-- Record wall time and peak RSS alongside Criterion estimates when establishing a release baseline, and retain the exact command, hardware, and raw logs with that benchmark record.
+- Record wall time and peak RSS alongside Criterion estimates when establishing
+  a release baseline, following the reproducibility requirements above.
 
 ## Results (2026-01-09)
 
@@ -90,7 +99,12 @@ Initial Criterion estimates:
 - `endpoint_modes/2500`: 2.7025–2.7129 ms
 - `endpoint_modes/5000`: 10.070–10.244 ms
 
-A complete Criterion process measured with `/usr/bin/time -l` used a maximum resident set size of 34,324,480 bytes (32.7 MiB). A second concurrently loaded 5,000-endpoint sample was noisy (10.792–18.286 ms), so release comparisons must use one warm-up, three isolated measured repeats, retained raw logs, and medians from the same hardware.
+A complete Criterion process measured with `/usr/bin/time -l` used a maximum
+resident set size of 34,324,480 bytes (32.7 MiB). A second concurrently loaded
+5,000-endpoint sample was noisy (10.792–18.286 ms). Because the exact invocation
+and raw logs for these historical samples are not tracked here, use them only as
+context; a release comparison requires one warm-up, three isolated measured
+repeats, retained raw logs, and medians from the same hardware.
 
 ## Clustering and assignment scalability baseline (2026-07-14)
 
@@ -104,7 +118,13 @@ CPUs, 64 GiB RAM). Criterion sample size was 10.
 - `tu_assignment_sparse_index/reads/10000`: 4.177–4.273 ms
 - `tu_assignment_sparse_index/reads/20000`: 5.233–5.584 ms
 
-Doubling the number of reads took about 2x for both dense-clustering cases. The v0.2.0
-implementation took about 0.98 s at 8,000 duplicate-heavy reads, 3.72 s at
-16,000, and 15.63 s at 32,000 in a direct one-thread CLI measurement, showing
-the former approximately quadratic curve.
+Within these two synthetic cases, whose endpoint diversity stays fixed at one or
+21 variants, doubling reads from 5,000 to 10,000 took about 2x. This is not a
+general worst-case linearity claim. The sparse-assignment comparison likewise
+keeps the TU count fixed at 10,000 while doubling reads per TU.
+
+The v0.2.0 implementation took about 0.98 s at 8,000 duplicate-heavy reads,
+3.72 s at 16,000, and 15.63 s at 32,000 in a direct one-thread CLI measurement,
+showing an approximately quadratic curve for that historical input. Its exact
+command, generated input, and raw log are not tracked in this repository, so the
+comparison is contextual evidence rather than a reproducible release gate.

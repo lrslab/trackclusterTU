@@ -53,6 +53,10 @@ fn trackclustertu_gff_to_bed_subcommand_converts_gene_features() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("genes=3\nout_bed={}\n", out_bed.display())
+    );
 
     assert_eq!(
         fs::read_to_string(&out_bed).unwrap(),

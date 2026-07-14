@@ -11,12 +11,16 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 ### Changed
 
 - Clustering now maintains endpoint consensus incrementally and read assignment
-  uses per-reference, per-strand interval indexes. Dense direct-RNA loci scale
-  near-linearly instead of repeatedly rebuilding growing families or comparing
-  every read with every emitted TU.
-- Non-empty clustering runs report structured clustering and assignment phase
-  boundaries, counts, and completed-stage elapsed times even without
-  `--timings`.
+  uses per-reference, per-strand interval indexes. In the measured synthetic
+  duplicate-heavy and fixed-21-endpoint-jitter dense-locus cases, doubling reads
+  from 5,000 to 10,000 took about 2x; the separated-TU assignment benchmark also
+  avoids the former all-reads-by-all-TUs scan. These cases do not establish a
+  general worst-case linearity guarantee for every dense locus.
+- Clustering runs with at least one retained read report structured clustering
+  and assignment phase boundaries, counts, and completed-stage elapsed times
+  even without `--timings`. Progress read counts are the reads retained after
+  parsing, validation, deduplication, and length filtering; runs with no
+  retained reads publish empty results without entering those two phases.
 
 ### Fixed
 
@@ -24,8 +28,12 @@ The format is based on Keep a Changelog, and this project follows SemVer.
   and output, preventing duplicate stable TU IDs and artificial exact-tie
   ambiguity. Stable-ID uniqueness is also enforced before files are published.
 - GFF3 annotation parsing now stops at the standard `##FASTA` directive, so
-  Prokka files with embedded reference sequences are accepted while feature
-  rows before the FASTA section remain strictly validated.
+  Prokka files with embedded reference sequences are accepted. Before that
+  directive, every feature row still requires nine columns. Consumed `gene`
+  rows retain strict coordinate and strand validation, and percent escapes in
+  parsed attribute key/value pairs are validated.
+- Direct `gff-to-bed` conversion now reports the requested final BED path after
+  its output transaction commits instead of exposing a temporary staging path.
 
 ## [0.2.0] - 2026-07-13
 
@@ -68,7 +76,7 @@ changes before adopting these outputs.
   signatures, multi-label TU semantics, `tu_semantics.tsv`, and `tus.gff3`.
 - Added atomic `read_rejections.tsv` diagnostics with source, sample, and line
   context, stable reason codes, deterministic summaries, and
-  `--strict-read-errors` for fail-fast quality-control workflows.
+  `--strict-read-errors` for atomic failure-on-any-rejection quality-control workflows.
 - Added atomic `run_manifest.json` provenance for `map` and `run`, including
   effective configuration, input SHA-256 values, package and Git state,
   chemistry, thread allocation, and external tool versions.
@@ -94,14 +102,16 @@ changes before adopting these outputs.
   `--score2-threshold` remain compatibility aliases.
 - Mapping accepts explicit minimap2 and samtools paths plus repeatable,
   boundary-preserving `--minimap2-arg` values appended after the required `-ax
-  map-ont` SAM preset. Mapper and sorter threads share the requested thread
-  budget, and effective values are recorded in the run manifest.
+  map-ont` SAM preset. Mapper and sorter allocations sum to the requested thread
+  budget for `--threads >= 2`; at `--threads 1`, both receive their required
+  one-thread minimum. `samtools view` remains a separate single-threaded
+  process. Effective values are recorded in the run manifest.
 - BED manifests now retain emitted BAM evidence sidecars. Clustering validates
   each retained row against the BED read and propagates effective full-length
   evidence into membership, TU, sample, group, and downstream gene counts.
 - Run manifests use Git metadata embedded at compile time; GitHub release builds
-  inject and verify the exact tagged commit instead of querying a build-runner
-  path after the binary has been distributed.
+  inject the exact tagged commit and verify that its revision bytes are embedded
+  in each binary instead of querying a build-runner path after distribution.
 - Coordinate-sorted BAM conversion streams output while validating actual
   record order. Exact-boundary support uses a bounded two-pass implementation;
   unsorted input uses an explicit warned fallback.
@@ -116,8 +126,8 @@ changes before adopting these outputs.
 - GitHub tag `v0.2.0` publishes Cargo release-mode binaries for
   `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, and
   `aarch64-apple-darwin`. Each archive includes `LICENSE` and `README.md`, and
-  the release provides one optional `SHA256SUMS` manifest. Crates.io
-  publication remains disabled.
+  the release provides one required `SHA256SUMS` manifest. Crates.io publication
+  remains disabled.
 
 ### Fixed
 
