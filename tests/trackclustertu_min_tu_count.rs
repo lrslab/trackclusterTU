@@ -75,16 +75,19 @@ fn trackclustertu_filters_low_support_tus() {
         )
     );
 
+    // r3 and r6 seed singleton TUs that the min-count filter drops; assignment
+    // then absorbs them into the surviving covering TU as contained fragments,
+    // so their reads still count.
     let membership_text = fs::read_to_string(&out_membership).unwrap();
     assert_eq!(
         membership_v1_projection(&membership_text),
         concat!(
             "r1\tTU000001\t1.000000\t1.000000\n",
             "r2\tTU000001\t0.980198\t0.990000\n",
-            "r3\t.\t.\t.\n",
+            "r3\tTU000001\t0.600000\t0.600000\n",
             "r4\tTU000002\t1.000000\t1.000000\n",
             "r5\tTU000002\t0.980198\t0.990000\n",
-            "r6\t.\t.\t.\n",
+            "r6\tTU000002\t0.400000\t0.400000\n",
             "r7\t.\t.\t.\n",
         )
     );
@@ -92,7 +95,7 @@ fn trackclustertu_filters_low_support_tus() {
     let count_text = fs::read_to_string(&out_tu_count).unwrap();
     assert_eq!(
         count_v1_projection(&count_text),
-        concat!("tu_id,count\n", "TU000001,2\n", "TU000002,2\n",)
+        concat!("tu_id,count\n", "TU000001,3\n", "TU000002,3\n",)
     );
 
     let _ = fs::remove_dir_all(&tmp);

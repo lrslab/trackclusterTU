@@ -40,8 +40,8 @@ Criterion and wall-time/RSS logs with the external release record.
 ### `benches/clustering.rs`
 
 - `tu_clustering` spreads reads across disconnected loci, with 100 reads per
-  seed. Each seed produces near-identical full-length reads (high span Jaccard)
-  plus one shorter truncation (exercises the overlap-over-longer second-pass
+  seed. Each seed produces near-identical full-length reads (high `score1`)
+  plus one shorter truncation (exercises the `score2` second-pass
   checks).
 - `tu_clustering_dense_hot_locus` keeps 5,000 or 10,000 reads in one
   overlap-connected locus. It covers both duplicate-heavy alignments and 21
@@ -51,8 +51,9 @@ Criterion and wall-time/RSS logs with the external release record.
 - `tu_assignment_sparse_index` assigns 10,000 or 20,000 reads against 10,000
   separated TUs on one reference/strand partition. It guards the spatial index
   used to avoid the former all-reads-by-all-TUs comparison.
-- The two clustering suites use span Jaccard `0.95` and overlap over longer
-  `0.99`. The sparse-assignment suite uses `0.95` and the CLI-default `0.80`.
+- The two clustering suites use `score1 = 0.95` and `score2 = 0.99`. The
+  sparse-assignment suite uses `score1 = 0.95` and the CLI-default
+  `score2 = 0.80`.
 
 ### `benches/endpoint_modes.rs`
 
@@ -72,8 +73,8 @@ Environment:
 Selected Criterion estimates:
 
 - `single_interval/overlap_len`: ~15.9 µs
-- `single_interval/score1_interval`: ~44.0 µs (legacy Rust API name for span Jaccard)
-- `single_interval/score2_interval`: ~84.6 µs (legacy Rust API name for overlap over longer)
+- `single_interval/score1_interval`: ~44.0 µs
+- `single_interval/score2_interval`: ~84.6 µs
 
 - `interval_lists/intersection_len/1000`: ~5.15 µs
 - `interval_lists/union_len/1000`: ~6.11 µs

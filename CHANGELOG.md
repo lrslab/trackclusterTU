@@ -6,6 +6,79 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-26
+
+This patch restores truncated-molecule pooling that was lost in `0.2.0`, while
+preserving the final-consensus guard against daisy-chain merging introduced in
+the `0.2.x` series. It can materially change TU membership and counts at
+affected loci, but it does not change CLI option names or output schemas.
+
+### Fixed
+
+- Restored the one-sided strand-aware 3-prime attachment gate used by `0.1.x`.
+  A shorter cluster may terminate anywhere inside its parent's span; it is
+  rejected only when it overhangs the parent's 3-prime end by more than
+  `--three-prime-tolerance-bp`. This reconnects 3-prime-truncated degradation
+  ladders that the symmetric `0.2.0`/`0.2.1` gate incorrectly split into
+  low-support TUs.
+- Final consensus families now retain contained fragments even when both
+  similarity thresholds fail. Only anchor-quality members vote on TU
+  boundaries, so absorbed fragments increase support without moving a
+  boundary, extending a TU span, or bridging two endpoint modes.
+- Read assignment applies the same containment rule. A uniquely explained
+  contained fragment is reported as `partial` and contributes to hard and
+  fractional counts, including when its original low-support family was
+  removed by `--min-tu-count`.
+
+### Changed
+
+- Exact boundary pairs are processed by descending support, ensuring that the
+  best-supported pair anchors the first consensus family rather than whichever
+  read sorts first genomically.
+- The consensus-retention and assignment jitter window is now
+  `max(--three-prime-tolerance-bp,
+  floor((1 - --span-jaccard-threshold) * read_length))`. The second-pass
+  attachment gate itself continues to use the fixed CLI tolerance.
+- Seed components are pooled before the final consensus split. The direct
+  consensus invariant is enforced once on final families, so membership still
+  cannot be justified solely through a chain of intermediate reads.
+- `tu_endpoint_stats.tsv` support and endpoint ranges include all retained
+  members, while consensus coordinates are determined only by anchor-quality
+  boundary voters.
+
+### Compatibility
+
+- The primary CLI flags remain `--span-jaccard-threshold`,
+  `--overlap-over-longer-threshold`, and
+  `--skip-overlap-over-longer-attachment`. The historical
+  `--score1-threshold`, `--score2-threshold`, and `--skip-score2-attachment`
+  spellings remain visible compatibility aliases.
+- Skipping overlap-over-longer attachment also disables contained-fragment
+  absorption and partial assignment. Final direct-consensus refinement still
+  applies to span-Jaccard seed components.
+- Existing BED/TSV inputs and v2 output schemas remain compatible. Because
+  assignments and candidate fields can change, rerun clustering and downstream
+  counting rather than combining `0.2.2` outputs with older results.
+
+### Validation
+
+On the retained primary, non-spliced *E. coli* RNA002 replicate 3 benchmark
+(6,486 reads, default clustering parameters):
+
+| Version | TUs | Hard assignments | Ambiguous |
+| --- | ---: | ---: | ---: |
+| `0.1.4` | 913 | 6,486 (100%) | not represented by the v1 schema |
+| `0.2.1` | 1,587 | 4,995 (77.0%) | 1,491 |
+| `0.2.2` | **888** | **6,269 (96.7%)** | **217** |
+
+The remaining `0.2.2` reads are explicit near-tie ambiguous assignments under
+the default `--ambiguity-margin 0.02`; `--fractional-assignment` can retain
+their count mass without forcing a hard biological choice. Shuffling input
+order produced byte-identical `tus.bed` output.
+
+**Full commit comparison:**
+[`v0.2.1...v0.2.2`](https://github.com/lrslab/trackclusterTU/compare/v0.2.1...v0.2.2)
+
 ## [0.2.1] - 2026-07-14
 
 ### Changed
@@ -189,7 +262,8 @@ changes before adopting these outputs.
 - `trackclustertu` CLI for clustering BED6/BED12/TSV inputs into TU BED6 + membership TSV.
 - Criterion benchmarks (`cargo bench`) and a baseline performance note in `doc/performance.md`.
 
-[Unreleased]: https://github.com/lrslab/trackclusterTU/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/lrslab/trackclusterTU/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/lrslab/trackclusterTU/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/lrslab/trackclusterTU/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lrslab/trackclusterTU/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/lrslab/trackclusterTU/compare/v0.1.3...v0.1.4

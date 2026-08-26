@@ -619,10 +619,60 @@ fn consensus_for_members(
     )
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConsensusRule {
-    Score1Only,
-    Final,
+/// Boundary consensus and endpoint stats for one final family.
+///
+/// The emitted interval is the modal endpoint pair of the family's core
+/// members (anchor-quality reads, judged by span-Jaccard against the family
+/// anchor at `members[0]`), matching how [`ConsensusFamily`] grows the
+/// consensus incrementally. Support and endpoint min/max still describe every
+/// member, so absorbed fragments remain visible in the stats.
+fn family_consensus(
+    members: &[usize],
+    indices_sorted: &[usize],
+    reads: &[ReadRecord],
+    score1_threshold: f64,
+) -> (Interval, TuEndpointStats) {
+    debug_assert!(!members.is_empty());
+    let anchor = reads[indices_sorted[members[0]]].interval;
+    let core: Vec<usize> = members
+        .iter()
+        .copied()
+        .filter(|&local_pos| {
+            score1_interval(reads[indices_sorted[local_pos]].interval, anchor) >= score1_threshold
+        })
+        .collect();
+    debug_assert!(!core.is_empty(), "the anchor itself is always core");
+    let (interval, mut stats) = consensus_for_members(&core, indices_sorted, reads);
+
+    stats.support = members.len();
+    for &local_pos in members {
+        let read = &reads[indices_sorted[local_pos]];
+        let five_prime = five_prime_coord(read);
+        let three_prime = three_prime_coord(read);
+        stats.five_prime_min = stats.five_prime_min.min(five_prime);
+        stats.five_prime_max = stats.five_prime_max.max(five_prime);
+        stats.three_prime_min = stats.three_prime_min.min(three_prime);
+        stats.three_prime_max = stats.three_prime_max.max(three_prime);
+    }
+
+    (interval, stats)
+}
+
+/// Strand-aware 3' agreement window for one read against a consensus.
+///
+/// Span-Jaccard grants two boundary-matched reads a combined endpoint budget of
+/// `(1 - score1_threshold)` of their span, so full-length molecules absorb 3'
+/// jitter proportional to their length. Truncated fragments qualify through the
+/// contained-read paths instead and would otherwise be held to the fixed
+/// attachment tolerance; scaling the window by read length keeps one TU's short
+/// and long molecules under the same relative noise budget.
+fn three_prime_window_bp(
+    read_len: u32,
+    score1_threshold: f64,
+    options: TuClusteringOptions,
+) -> u32 {
+    let scaled = ((1.0 - score1_threshold).max(0.0) * read_len as f64).floor() as u32;
+    options.three_prime_tolerance_bp.max(scaled)
 }
 
 fn interval_satisfies_consensus(
@@ -631,18 +681,46 @@ fn interval_satisfies_consensus(
     score1_threshold: f64,
     score2_threshold: f64,
     options: TuClusteringOptions,
-    rule: ConsensusRule,
 ) -> bool {
     if score1_interval(read.interval, consensus) >= score1_threshold {
         return true;
     }
-    if rule == ConsensusRule::Score1Only || !options.attach_contained_reads {
+    if !options.attach_contained_reads {
         return false;
     }
 
-    let three_prime_delta =
-        three_prime_coord(read).abs_diff(endpoint_coord(consensus, read.strand, false));
-    if three_prime_delta > options.three_prime_tolerance_bp {
+    let window = three_prime_window_bp(read.interval.len(), score1_threshold, options);
+    let read_five_prime = five_prime_coord(read);
+    let read_three_prime = three_prime_coord(read);
+    let consensus_five_prime = endpoint_coord(consensus, read.strand, true);
+    let consensus_three_prime = endpoint_coord(consensus, read.strand, false);
+
+    // A fragment contained in the consensus span (up to boundary jitter) is a
+    // truncated molecule of this TU, not evidence for a new one. Keeping it
+    // restores the 0.1.x absorption semantics that read-level span-Jaccard
+    // chains and the overlap-over-longer ladders pooled, without their
+    // boundary drift: an absorbed member never votes on the consensus, cannot
+    // extend it, and qualification is always against the final consensus,
+    // never against an intermediate read.
+    let five_prime_overhang =
+        match cmp_in_transcription_direction(read.strand, read_five_prime, consensus_five_prime) {
+            Ordering::Less => read_five_prime.abs_diff(consensus_five_prime),
+            Ordering::Greater | Ordering::Equal => 0,
+        };
+    let three_prime_overhang = match cmp_in_transcription_direction(
+        read.strand,
+        read_three_prime,
+        consensus_three_prime,
+    ) {
+        Ordering::Greater => read_three_prime.abs_diff(consensus_three_prime),
+        Ordering::Less | Ordering::Equal => 0,
+    };
+    if five_prime_overhang <= window && three_prime_overhang <= window {
+        return true;
+    }
+
+    // 3'-anchored paths for reads reaching upstream of the consensus 5'.
+    if read_three_prime.abs_diff(consensus_three_prime) > window {
         return false;
     }
 
@@ -850,13 +928,32 @@ fn assignment_candidate(
         three_prime_coord(read).abs_diff(endpoint_coord(tu.interval, read.strand, false));
 
     let direct = score1 >= score1_threshold;
-    let partial = !direct
-        && options.attach_contained_reads
-        && three_prime_delta_bp <= options.three_prime_tolerance_bp
+    // Mirror of `interval_satisfies_consensus`: contained fragments of a TU and
+    // 3'-anchored near-matches count toward it as partial evidence.
+    let window = three_prime_window_bp(read.interval.len(), score1_threshold, options);
+    let five_prime_overhang = match cmp_in_transcription_direction(
+        read.strand,
+        five_prime_coord(read),
+        endpoint_coord(tu.interval, read.strand, true),
+    ) {
+        Ordering::Less => five_prime_delta_bp,
+        Ordering::Greater | Ordering::Equal => 0,
+    };
+    let three_prime_overhang = match cmp_in_transcription_direction(
+        read.strand,
+        three_prime_coord(read),
+        endpoint_coord(tu.interval, read.strand, false),
+    ) {
+        Ordering::Greater => three_prime_delta_bp,
+        Ordering::Less | Ordering::Equal => 0,
+    };
+    let contained = five_prime_overhang <= window && three_prime_overhang <= window;
+    let anchored = three_prime_delta_bp <= window
         && (score2 >= score2_threshold
             || options
                 .max_five_prime_delta_bp
                 .is_some_and(|maximum| five_prime_delta_bp <= maximum));
+    let partial = !direct && options.attach_contained_reads && (contained || anchored);
     if !direct && !partial {
         return None;
     }
@@ -1247,6 +1344,16 @@ impl EndpointConsensusState {
     }
 }
 
+/// One growing family during the final consensus split.
+///
+/// Boundary consensus is voted on exclusively by "core" members: reads whose
+/// span-Jaccard against the fixed family anchor clears `score1_threshold`.
+/// Absorbed fragments (contained reads and 3'-anchored near-matches) join the
+/// family and count toward support, but never shift the boundary. This keeps
+/// the emitted TU anchored on its full-length molecules: a dense hotspot of
+/// truncation fragments cannot outvote the boundary mode and evict the
+/// full-length cloud, which mirrors how 0.1.x derived the TU span from the
+/// representative read while absorbing fragments silently.
 #[derive(Clone, Debug)]
 struct ConsensusFamily {
     members: Vec<usize>,
@@ -1260,7 +1367,6 @@ struct ConsensusSplitConfig {
     score1_threshold: f64,
     score2_threshold: f64,
     options: TuClusteringOptions,
-    rule: ConsensusRule,
 }
 
 impl ConsensusFamily {
@@ -1306,8 +1412,25 @@ impl ConsensusFamily {
             config.score1_threshold,
             config.score2_threshold,
             config.options,
-            config.rule,
         ) {
+            return false;
+        }
+
+        // Only anchor-quality reads vote on the boundary; absorbed fragments
+        // must qualify against the standing consensus but cannot move it.
+        let is_core =
+            score1_interval(candidate.interval, anchor.interval) >= config.score1_threshold;
+        if !is_core {
+            if interval_satisfies_consensus(
+                candidate,
+                self.consensus,
+                config.score1_threshold,
+                config.score2_threshold,
+                config.options,
+            ) {
+                self.members.push(local_pos);
+                return true;
+            }
             return false;
         }
 
@@ -1327,7 +1450,6 @@ impl ConsensusFamily {
                 config.score1_threshold,
                 config.score2_threshold,
                 config.options,
-                config.rule,
             )
         } else {
             self.members
@@ -1341,7 +1463,6 @@ impl ConsensusFamily {
                         config.score1_threshold,
                         config.score2_threshold,
                         config.options,
-                        config.rule,
                     )
                 })
         };
@@ -1358,12 +1479,48 @@ impl ConsensusFamily {
     }
 }
 
+/// Order component members so the best-supported exact boundary pair is processed first.
+///
+/// Members are grouped by identical read intervals (equal strand-aware endpoint pairs inside
+/// one partition) and groups are emitted by descending support, breaking ties in transcription
+/// direction. Family anchors therefore sit on modal boundary evidence instead of on whichever
+/// read happens to start a component in genomic order.
+fn members_in_support_order(
+    members: &[usize],
+    indices_sorted: &[usize],
+    reads: &[ReadRecord],
+) -> Vec<usize> {
+    let mut ordered = members.to_vec();
+    ordered
+        .sort_by(|&a, &b| cmp_local_read_in_transcription_direction(indices_sorted, reads, a, b));
+
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for local_pos in ordered {
+        let interval = reads[indices_sorted[local_pos]].interval;
+        match groups.last_mut() {
+            Some(group) if reads[indices_sorted[group[0]]].interval == interval => {
+                group.push(local_pos);
+            }
+            _ => groups.push(vec![local_pos]),
+        }
+    }
+
+    let mut group_order: Vec<usize> = (0..groups.len()).collect();
+    group_order.sort_by(|&a, &b| groups[b].len().cmp(&groups[a].len()).then(a.cmp(&b)));
+
+    group_order
+        .into_iter()
+        .flat_map(|group_idx| std::mem::take(&mut groups[group_idx]))
+        .collect()
+}
+
 /// Split a connected component into deterministic anchor-bounded consensus families.
 ///
-/// A family can grow only when the candidate qualifies directly against its fixed anchor and
-/// every prospective member qualifies directly against the prospective support-mode
-/// consensus. This is the final-cluster invariant: no membership can be justified solely by a
-/// path through intermediate reads.
+/// Members are processed in support order, so the strongest exact boundary pair founds the
+/// first family and anchors it. A family can grow only when the candidate qualifies directly
+/// against its fixed anchor and every prospective member qualifies directly against the
+/// prospective support-mode consensus. This is the final-cluster invariant: no membership can
+/// be justified solely by a path through intermediate reads.
 fn split_members_by_consensus(
     members: &[usize],
     indices_sorted: &[usize],
@@ -1371,20 +1528,14 @@ fn split_members_by_consensus(
     score1_threshold: f64,
     score2_threshold: f64,
     options: TuClusteringOptions,
-    rule: ConsensusRule,
 ) -> Vec<Vec<usize>> {
-    let mut ordered = members.to_vec();
-    ordered
-        .sort_by(|&a, &b| cmp_local_read_in_transcription_direction(indices_sorted, reads, a, b));
-
     let config = ConsensusSplitConfig {
         score1_threshold,
         score2_threshold,
         options,
-        rule,
     };
     let mut families: Vec<ConsensusFamily> = Vec::new();
-    for local_pos in ordered {
+    for local_pos in members_in_support_order(members, indices_sorted, reads) {
         let mut selected_family = None;
 
         for (family_idx, family) in families.iter_mut().enumerate() {
@@ -1420,12 +1571,29 @@ fn representative_read_index(
     representative
 }
 
+/// One-sided 3' gate for cluster attachment, as in 0.1.x.
+///
+/// The child may terminate anywhere inside the candidate's span (a truncated
+/// molecule), but may not overhang the candidate's 3' end by more than the
+/// tolerance. Attachment chains through `resolve_root`, so this is what lets
+/// degradation ladders pool with their full-length parent; the final consensus
+/// split then decides membership against the family consensus, so pooling
+/// breadth cannot leak into TU boundaries.
 fn candidate_within_three_prime_tolerance(
     child: &ReadRecord,
     candidate: &ReadRecord,
     tolerance_bp: u32,
 ) -> bool {
-    three_prime_coord(child).abs_diff(three_prime_coord(candidate)) <= tolerance_bp
+    match cmp_in_transcription_direction(
+        child.strand,
+        three_prime_coord(child),
+        three_prime_coord(candidate),
+    ) {
+        Ordering::Greater => {
+            three_prime_coord(child).abs_diff(three_prime_coord(candidate)) <= tolerance_bp
+        }
+        Ordering::Less | Ordering::Equal => true,
+    }
 }
 
 fn candidate_five_prime_delta(child: &ReadRecord, candidate: &ReadRecord) -> u32 {
@@ -1522,7 +1690,8 @@ fn final_consensus_family(
     options: TuClusteringOptions,
 ) -> FinalConsensusFamily {
     let rep_read_index = representative_read_index(&members, indices_sorted, reads);
-    let (interval, endpoint_stats) = consensus_for_members(&members, indices_sorted, reads);
+    let (interval, endpoint_stats) =
+        family_consensus(&members, indices_sorted, reads, score1_threshold);
     debug_assert!(members.iter().all(|&local_pos| {
         interval_satisfies_consensus(
             &reads[indices_sorted[local_pos]],
@@ -1530,7 +1699,6 @@ fn final_consensus_family(
             score1_threshold,
             score2_threshold,
             options,
-            ConsensusRule::Final,
         )
     }));
     FinalConsensusFamily {
@@ -1570,7 +1738,8 @@ fn coalesce_identical_consensus_families(
             .iter()
             .flat_map(|family| family.members.iter().copied())
             .collect();
-        let (merged_interval, _) = consensus_for_members(&merged_members, indices_sorted, reads);
+        let (merged_interval, _) =
+            family_consensus(&merged_members, indices_sorted, reads, score1_threshold);
         let merged_is_valid = merged_interval == shared_interval
             && merged_members.iter().all(|&local_pos| {
                 interval_satisfies_consensus(
@@ -1579,7 +1748,6 @@ fn coalesce_identical_consensus_families(
                     score1_threshold,
                     score2_threshold,
                     options,
-                    ConsensusRule::Final,
                 )
             });
 
@@ -1643,22 +1811,17 @@ fn cluster_tus_region(
         clusters_by_root.entry(root).or_default().push(local_pos);
     }
 
+    // Seed clusters are the raw span-Jaccard components, exactly as in 0.1.x, so
+    // the attachment pass sees the same merge topology: dense truncation ladders
+    // stay connected at read level and containment chains can reach the parent.
+    // The consensus invariant is enforced once, after pooling, by the final
+    // split below.
     let mut clusters: Vec<SeedCluster> = Vec::with_capacity(clusters_by_root.len());
     for members in clusters_by_root.into_values() {
-        for family in split_members_by_consensus(
-            &members,
-            indices_sorted,
-            reads,
-            score1_threshold,
-            score2_threshold,
-            options,
-            ConsensusRule::Score1Only,
-        ) {
-            clusters.push(SeedCluster {
-                rep_read_index: representative_read_index(&family, indices_sorted, reads),
-                members: family,
-            });
-        }
+        clusters.push(SeedCluster {
+            rep_read_index: representative_read_index(&members, indices_sorted, reads),
+            members,
+        });
     }
 
     clusters.sort_by(|a, b| cmp_read_idx(reads, a.rep_read_index, b.rep_read_index));
@@ -1762,7 +1925,6 @@ fn cluster_tus_region(
             score1_threshold,
             score2_threshold,
             options,
-            ConsensusRule::Final,
         ) {
             final_families.push(final_consensus_family(
                 family,
@@ -2139,15 +2301,9 @@ mod tests {
         score1_threshold: f64,
         score2_threshold: f64,
         options: TuClusteringOptions,
-        rule: ConsensusRule,
     ) -> Vec<Vec<usize>> {
-        let mut ordered = members.to_vec();
-        ordered.sort_by(|&a, &b| {
-            cmp_local_read_in_transcription_direction(indices_sorted, reads, a, b)
-        });
-
         let mut families: Vec<Vec<usize>> = Vec::new();
-        for local_pos in ordered {
+        for local_pos in members_in_support_order(members, indices_sorted, reads) {
             let candidate = &reads[indices_sorted[local_pos]];
             let mut selected_family = None;
             for (family_idx, family) in families.iter().enumerate() {
@@ -2158,14 +2314,14 @@ mod tests {
                     score1_threshold,
                     score2_threshold,
                     options,
-                    rule,
                 ) {
                     continue;
                 }
 
                 let mut prospective = family.clone();
                 prospective.push(local_pos);
-                let (consensus, _) = consensus_for_members(&prospective, indices_sorted, reads);
+                let (consensus, _) =
+                    family_consensus(&prospective, indices_sorted, reads, score1_threshold);
                 if prospective.iter().all(|&member_pos| {
                     interval_satisfies_consensus(
                         &reads[indices_sorted[member_pos]],
@@ -2173,7 +2329,6 @@ mod tests {
                         score1_threshold,
                         score2_threshold,
                         options,
-                        rule,
                     )
                 }) {
                     selected_family = Some(family_idx);
@@ -2751,24 +2906,36 @@ mod tests {
     }
 
     #[test]
-    fn five_prime_override_cannot_bypass_three_prime_tolerance() {
-        let reads = vec![
+    fn five_prime_override_absorbs_truncated_but_not_overhanging_reads() {
+        let options = TuClusteringOptions {
+            three_prime_tolerance_bp: 12,
+            max_five_prime_delta_bp: Some(1),
+            ..TuClusteringOptions::default()
+        };
+
+        // A 5'-anchored fragment terminating inside the longer read is a
+        // truncated molecule of it: the override pools the pair and
+        // containment absorbs the fragment without moving the boundary.
+        let truncated = vec![
             read("chr1", Strand::Plus, 0, 1000, "longer"),
             read("chr1", Strand::Plus, 1, 101, "shorter"),
         ];
+        let result = cluster_tus_with_options(&truncated, 0.95, 0.99, options).unwrap();
+        assert_eq!(result.tus().len(), 1);
+        assert_eq!(
+            result.tus()[0].interval,
+            Interval::new(Coord::new(0), Coord::new(1000)).unwrap()
+        );
+        assert_eq!(result.endpoint_stats()[0].support, 2);
 
-        let result = cluster_tus_with_options(
-            &reads,
-            0.95,
-            0.99,
-            TuClusteringOptions {
-                three_prime_tolerance_bp: 12,
-                max_five_prime_delta_bp: Some(1),
-                ..TuClusteringOptions::default()
-            },
-        )
-        .unwrap();
-
+        // A read overhanging the 3' end beyond the tolerance is not a
+        // fragment: the one-sided attachment gate rejects it even though the
+        // 5' override matches.
+        let overhanging = vec![
+            read("chr1", Strand::Plus, 0, 200, "longer"),
+            read("chr1", Strand::Plus, 1, 220, "overhang"),
+        ];
+        let result = cluster_tus_with_options(&overhanging, 0.95, 0.99, options).unwrap();
         assert_eq!(result.tus().len(), 2);
     }
 
@@ -3158,27 +3325,23 @@ mod tests {
                 max_five_prime_delta_bp: Some(15),
             };
 
-            for rule in [ConsensusRule::Score1Only, ConsensusRule::Final] {
-                let incremental = split_members_by_consensus(
-                    &members,
-                    &indices_sorted,
-                    &reads,
-                    0.75,
-                    0.60,
-                    options,
-                    rule,
-                );
-                let reference = split_members_by_consensus_naive_for_test(
-                    &members,
-                    &indices_sorted,
-                    &reads,
-                    0.75,
-                    0.60,
-                    options,
-                    rule,
-                );
-                prop_assert_eq!(incremental, reference);
-            }
+            let incremental = split_members_by_consensus(
+                &members,
+                &indices_sorted,
+                &reads,
+                0.75,
+                0.60,
+                options,
+            );
+            let reference = split_members_by_consensus_naive_for_test(
+                &members,
+                &indices_sorted,
+                &reads,
+                0.75,
+                0.60,
+                options,
+            );
+            prop_assert_eq!(incremental, reference);
         }
 
         #[test]
@@ -3482,5 +3645,133 @@ mod tests {
         assert_eq!(by_id["r5"], "TU000003");
         assert_eq!(by_id["r6"], "TU000004");
         assert_eq!(by_id["r7"], "TU000005");
+    }
+
+    #[test]
+    fn five_prime_degradation_ladder_collapses_into_one_tu() {
+        // Direct-RNA style locus: a full-length boundary mode plus a dense 5'
+        // truncation ladder sharing the 3' end. The overlap-over-longer pass
+        // chains the ladder to the full-length family; the final consensus
+        // must retain every 3'-anchored contained fragment instead of packing
+        // the ladder into separate low-support TUs.
+        let reads = vec![
+            read("chr1", Strand::Plus, 0, 3000, "full1"),
+            read("chr1", Strand::Plus, 0, 3000, "full2"),
+            read("chr1", Strand::Plus, 0, 3000, "full3"),
+            read("chr1", Strand::Plus, 450, 3004, "trunc450"),
+            read("chr1", Strand::Plus, 832, 2998, "trunc832"),
+            read("chr1", Strand::Plus, 1157, 3006, "trunc1157"),
+            read("chr1", Strand::Plus, 1433, 3002, "trunc1433"),
+            read("chr1", Strand::Plus, 1668, 2996, "trunc1668"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.80).unwrap();
+
+        assert_eq!(result.tus().len(), 1);
+        assert_eq!(
+            result.tus()[0].interval,
+            Interval::new(Coord::new(0), Coord::new(3000)).unwrap()
+        );
+        assert_eq!(result.endpoint_stats()[0].support, reads.len());
+        assert!(result.read_to_tu().iter().all(|&tu_index| tu_index == 0));
+
+        let mirrored = mirror_reads(&reads, 3006);
+        let mirrored_result = cluster_tus(&mirrored, 0.95, 0.80).unwrap();
+        assert_eq!(mirrored_result.tus().len(), 1);
+        assert_eq!(mirrored_result.endpoint_stats()[0].support, reads.len());
+        assert_eq!(
+            mirrored_result.tus()[0].interval,
+            Interval::new(Coord::new(6), Coord::new(3006)).unwrap()
+        );
+    }
+
+    #[test]
+    fn contained_reads_with_distant_three_prime_stay_separate() {
+        // Containment absorption only applies within a pooled component, and
+        // pooling still demands 3' agreement or a score1 chain: a nested
+        // population terminating 500 bp early never pools with the covering
+        // family, so it stays a separate TU.
+        let reads = vec![
+            read("chr1", Strand::Plus, 0, 3000, "full1"),
+            read("chr1", Strand::Plus, 0, 3000, "full2"),
+            read("chr1", Strand::Plus, 500, 2500, "nested1"),
+            read("chr1", Strand::Plus, 500, 2500, "nested2"),
+        ];
+
+        let result = cluster_tus(&reads, 0.95, 0.80).unwrap();
+
+        assert_eq!(result.tus().len(), 2);
+        let mut supports: Vec<usize> = result
+            .endpoint_stats()
+            .iter()
+            .map(|stats| stats.support)
+            .collect();
+        supports.sort_unstable();
+        assert_eq!(supports, vec![2, 2]);
+        assert_ne!(result.read_to_tu()[0], result.read_to_tu()[2]);
+    }
+
+    #[test]
+    fn modal_boundary_pair_seeds_the_family_anchor() {
+        // A jitter cloud chained by score1: the family anchor must sit on the
+        // modal boundary pair (three reads at [4, 100)) so both edge reads
+        // qualify directly, instead of anchoring on the 5'-most edge read and
+        // splitting the far edge into a second TU.
+        let reads = vec![
+            read("chr1", Strand::Plus, 0, 100, "edge_low"),
+            read("chr1", Strand::Plus, 4, 100, "mode1"),
+            read("chr1", Strand::Plus, 4, 100, "mode2"),
+            read("chr1", Strand::Plus, 4, 100, "mode3"),
+            read("chr1", Strand::Plus, 8, 100, "edge_high"),
+        ];
+
+        let result = cluster_tus_with_options(
+            &reads,
+            0.95,
+            0.80,
+            TuClusteringOptions {
+                attach_contained_reads: false,
+                ..TuClusteringOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.tus().len(), 1);
+        assert_eq!(
+            result.tus()[0].interval,
+            Interval::new(Coord::new(4), Coord::new(100)).unwrap()
+        );
+        assert_eq!(result.endpoint_stats()[0].support, reads.len());
+    }
+
+    #[test]
+    fn contained_fragments_assign_partial_to_the_covering_tu() {
+        // Degradation fragments of a TU count toward it: both the 3'-anchored
+        // fragment and the fully internal fragment are partial evidence for
+        // TU_A, while a read overhanging the TU 3' end beyond the jitter
+        // window is not explained by it and stays unassigned.
+        let tus = vec![tu("chr", Strand::Plus, 0, 3000, "TU_A")];
+        let reads = vec![
+            read("chr", Strand::Plus, 1800, 3005, "fragment"),
+            read("chr", Strand::Plus, 1800, 2500, "internal"),
+            read("chr", Strand::Plus, 1800, 3400, "overhang"),
+        ];
+
+        let assignments = assign_reads_to_tus(
+            &reads,
+            &tus,
+            0.95,
+            0.80,
+            TuClusteringOptions::default(),
+            0.0,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(assignments[0].status, AssignmentStatus::Partial);
+        assert_eq!(assignments[0].best.unwrap().tu_index, 0);
+        assert_eq!(assignments[1].status, AssignmentStatus::Partial);
+        assert_eq!(assignments[1].best.unwrap().tu_index, 0);
+        assert_eq!(assignments[2].status, AssignmentStatus::Unassigned);
     }
 }

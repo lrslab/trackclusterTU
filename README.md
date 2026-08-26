@@ -8,26 +8,6 @@ Fast interval similarity and scalable clustering for bacterial transcript units 
 
 This repository ships the Rust `trackclustertu` CLI.
 
-## Citation And Relationship To TrackCluster
-
-TrackCluster was introduced in:
-
-> Li R, Ren X, Ding Q, Bi Y, Xie D, Zhao Z. 2020. Direct full-length RNA sequencing reveals unexpected transcriptome complexity during *Caenorhabditis elegans* development. *Genome Research* 30:287–298. [doi:10.1101/gr.251512.119](https://doi.org/10.1101/gr.251512.119)
-
-The original implementation is available at [Runsheng/trackcluster](https://github.com/Runsheng/trackcluster). If this project's score definitions or clustering lineage contribute to an analysis, cite the original paper as well as the exact `trackclustertu` version/commit used.
-
-### Compatibility And Deliberate Differences
-
-This Rust project is an independent bacterial-TU implementation, not a drop-in replacement for the original Python TrackCluster workflow.
-
-- It retains the two overlap concepts, now named **span Jaccard** (`overlap / union`) and **overlap over longer** (`overlap / max(length)`); the older `score1`/`score2` CLI names remain compatibility aliases.
-- BED12 input is reduced to its outer span for bacterial boundary clustering. Original TrackCluster uses richer mapping tracks, exon/junction structure, reference isoforms, and bigGenePred-oriented workflows.
-- Final TU boundaries are support-mode endpoint consensuses, while the longest molecule is retained only as an example. Original TrackCluster representative behavior and this consensus invariant are not output-equivalent.
-- Second-pass eligibility is symmetric, always enforces an absolute strand-aware 3-prime tolerance, and reports ambiguity rather than silently resolving equal evidence by an identifier.
-- Evidence sidecars, chemistry profiles, transactional outputs, stable genomic TU IDs, bacterial gene-context classes, and the v2 membership/count schemas are project-specific extensions.
-
-Do not assume identical TU IDs, membership rows, counts, or default biological behavior between the two tools. Comparative analyses should pin their protocol, inputs, caller versions, and normalization rules independently of this package.
-
 ## Project Metadata
 
 - Repository: [lrslab/trackclusterTU](https://github.com/lrslab/trackclusterTU)
@@ -40,17 +20,19 @@ Do not assume identical TU IDs, membership rows, counts, or default biological b
 
 For bacteria, each mapped read is treated primarily as a single genomic interval `[start, end)` using 0-based, half-open coordinates.
 Reads are clustered into candidate transcript units using overlap-based similarity.
-When the input is BED12, clustering intentionally uses only the outer transcript span `[tx_start, tx_end)`; exon blocks do not affect either span metric.
+When the input is BED12, clustering intentionally uses only the outer transcript span `[tx_start, tx_end)`; exon blocks do not affect `score1` or `score2`.
 
-### Similarity Metrics
+### Similarity Scores
 
-- **span Jaccard** (legacy `score1`): `overlap / union`
-- **overlap over longer** (legacy `score2`): `overlap / max(lenA, lenB)`
+- `score1`: `overlap / union`
+- `score2`: `overlap / max(lenA, lenB)`
 
-By default, `trackclustertu cluster` and `trackclustertu run` use span Jaccard to form seed clusters and then use overlap over longer in a second pass to merge only very similar seed clusters without treating strong short/long containment as a perfect match.
-That second pass allows a strand-aware 3 prime mismatch of up to `12 bp` by default; adjust it with `--three-prime-tolerance-bp`.
+By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to pool truncated molecules with their parent cluster.
+That second pass is one-sided on the 3 prime end: a shorter cluster may terminate anywhere inside its parent's span but may not overhang the parent's strand-aware 3 prime end by more than `12 bp` by default; adjust it with `--three-prime-tolerance-bp`.
 If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta` to allow merges within an explicit strand-aware 5 prime delta.
-If you want to keep only the span-Jaccard seed clusters as the final TUs, pass `--skip-overlap-over-longer-attachment`. The older `--skip-score2-attachment` spelling remains a compatibility alias.
+If you want to keep only the `score1` seed clusters as the final TUs, pass `--skip-score2-attachment`.
+
+Pooled reads are then split into final consensus families. Boundary consensus is voted on only by anchor-quality members (`score1` at or above the threshold against the family anchor), while contained fragments — reads staying inside the consensus span up to a length-scaled jitter window on either end — are absorbed as members that count toward support without moving boundaries. Membership is always justified against the final consensus, never through a chain of intermediate reads, so distinct endpoint modes beyond the jitter window still split into separate TUs.
 
 ## Install
 
@@ -59,8 +41,8 @@ If you want to keep only the span-Jaccard seed clusters as the final TUs, pass `
 Prebuilt release tarballs are published from GitHub Actions on tagged releases:
 
 - Releases: [lrslab/trackclusterTU/releases](https://github.com/lrslab/trackclusterTU/releases)
-- Release tag for this version: `v0.2.1`
-- Archive naming: `trackclustertu-v0.2.1-<target>.tar.gz`
+- Release tag for this version: `v0.2.2`
+- Archive naming: `trackclustertu-v0.2.2-<target>.tar.gz`
 - Required checksum manifest: `SHA256SUMS`
 
 Each archive contains the `trackclustertu` executable, `LICENSE`, and `README.md`.
@@ -269,7 +251,7 @@ count table.
 
 The current built-in defaults in code are:
 
-- clustering: `--span-jaccard-threshold 0.95`, `--overlap-over-longer-threshold 0.80`, `--three-prime-tolerance-bp 12`
+- clustering: `--score1-threshold 0.95`, `--score2-threshold 0.80`, `--three-prime-tolerance-bp 12`
 - diagnose/rescue: `--three-prime-window-bp 12`, `--max-three-prime-family-diameter-bp 12` (defaults to the 3-prime window), `--five-prime-window-bp 10`, `--min-family-support 20`, `--min-mode-support 20`, `--min-mode-fraction 0.02`, `--max-candidates-per-family 3`; `--min-read-len` is unset
 - rescue naming: `--rescue-prefix RESC`
 
@@ -365,7 +347,7 @@ trackclustertu run \
   --out-dir results
 ```
 
-`trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--span-jaccard-threshold`, `--overlap-over-longer-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-overlap-over-longer-attachment`.
+`trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
 It does not automatically run `diagnose-missed-tus` or `rescue-missed-tus`.
 
 This writes:
@@ -423,15 +405,15 @@ trackclustertu gff-to-bed \
 trackclustertu cluster \
   --manifest mapped/samples.bed.tsv \
   --format bed6 \
-  --span-jaccard-threshold 0.95 \
-  --overlap-over-longer-threshold 0.80 \
+  --score1-threshold 0.95 \
+  --score2-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
   --max-5p-delta 50 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
 
-The default clustering thresholds are `--span-jaccard-threshold 0.95` and `--overlap-over-longer-threshold 0.80`. The visible `--score1-threshold` and `--score2-threshold` aliases are retained for older scripts.
+The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.80`.
 The default second-pass 3 prime allowance is `--three-prime-tolerance-bp 12`.
 `--max-5p-delta` is optional and disabled unless you set it.
 

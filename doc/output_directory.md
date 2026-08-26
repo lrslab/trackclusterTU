@@ -21,7 +21,7 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
 - `*.membership.tsv` (TSV): one line per read assignment
   - schema marker: `#trackclustertu_membership_schema=v2`
   - cluster writes the canonical 20-column v2 form
-  - the first four columns remain `read_id  tu_id  score1  score2` for schema compatibility; these legacy labels mean span Jaccard and overlap over longer, respectively, and the metadata records that mapping
+  - the first four columns remain `read_id  tu_id  score1  score2`; `score1` is `overlap / union` and `score2` is `overlap / max(length)`
   - appended fields record assignment status, best/second candidates and scores, both endpoint deltas, assignment-score margin, primary/fractional weights, and full-length-evidence state
 - `*.tu_count.csv` (CSV): TU counts table
   - header: `tu_id,count,unique_count,full_length_evidence_count,total_count,fractional_count`
@@ -32,12 +32,12 @@ Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` w
   - columns: `sample  source_path  input_format  record  line  read_id  stage  reason  detail`
   - the file is written atomically and remains header-only when every read is accepted; override it with `--out-read-rejections`
 
-By default, `trackclustertu cluster` forms span-Jaccard seed clusters and then runs a second-pass overlap-over-longer attachment that penalizes large short/long differences.
-The canonical flags are `--span-jaccard-threshold` and `--overlap-over-longer-threshold`; visible `--score1-threshold` and `--score2-threshold` aliases remain for older scripts.
-That second pass allows a strand-aware 3 prime mismatch of up to `12 bp` by default, configurable with `--three-prime-tolerance-bp`.
+By default, `trackclustertu cluster` forms `score1` seed clusters and then runs a second-pass `score2` attachment that pools truncated molecules with their parent cluster.
+Set the thresholds with `--score1-threshold` and `--score2-threshold`.
+The second-pass 3 prime gate is one-sided: a shorter cluster may terminate anywhere inside its parent but may not overhang the parent's strand-aware 3 prime end by more than `12 bp` by default. Configure the limit with `--three-prime-tolerance-bp`.
 If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta`.
-If `--skip-overlap-over-longer-attachment` is used, the span-Jaccard seed clusters are kept as the final TUs. The older `--skip-score2-attachment` spelling remains a compatibility alias.
-Clustering is span-based: when the input is BED12, only the outer transcript interval `[tx_start, tx_end)` participates in span Jaccard and overlap over longer.
+If `--skip-score2-attachment` is used, the `score1` seed clusters are kept as the final TUs.
+Clustering is span-based: when the input is BED12, only the outer transcript interval `[tx_start, tx_end)` participates in `score1` and `score2`.
 
 Individual read-record errors are recoverable by default: the bad read is
 quarantined, its reason is recorded, and parsing continues with the next
@@ -274,7 +274,7 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 - `annotation.bed`: converted annotation BED when `--annotation-gff` is used
 - `run_manifest.json`: published only after the complete `run` pipeline succeeds
 
-`trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--span-jaccard-threshold`, `--overlap-over-longer-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-overlap-over-longer-attachment`.
+`trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
 It does not automatically run the missed-TU diagnose/rescue stages.
 
 Mapping always supplies minimap2 with `-ax map-ont`. It then appends repeatable `--minimap2-arg <OS_VALUE>` options without whitespace reparsing and accepts explicit `--minimap2` / `--samtools` paths. The old `--minimap2-args "..."` form appends its whitespace-split values, is deprecated, and cannot be combined with the repeatable form.
@@ -284,7 +284,7 @@ Mapping always supplies minimap2 with `-ax map-ont`. It then appends repeatable 
 - Coordinates are **0-based, half-open** intervals: `[start, end)` (BED style).
 - BED6 outputs such as `bed/<sample>.bed` and `pooled.bed` use:
   `chrom  start  end  name  score  strand`
-- Cluster-generated membership TSV keeps `read_id  tu_id  score1  score2` as its first four compatibility columns (`score1` = span Jaccard; `score2` = overlap over longer) and appends the canonical v2 audit fields described above. Rescue may preserve legacy rows, earlier six-column v2 rows, or mixed compatibility rows from its input; consult that file's metadata and per-row schema field.
+- Cluster-generated membership TSV keeps `read_id  tu_id  score1  score2` as its first four columns and appends the v2 audit fields described above. Rescue may preserve legacy rows, earlier six-column v2 rows, or mixed compatibility rows from its input; consult that file's metadata and per-row schema field.
 - In pooled mode, membership read IDs are tagged as `<sample>::<read_id>`; `::` is reserved and is rejected in manifest sample names
 
 `cluster --format auto` is the default. Suffix matching is case-insensitive:
@@ -317,8 +317,8 @@ Once you have `samples.bed.tsv`, you can re-run clustering without re-mapping:
 trackclustertu cluster \
   --manifest samples.bed.tsv \
   --format bed6 \
-  --span-jaccard-threshold 0.95 \
-  --overlap-over-longer-threshold 0.80 \
+  --score1-threshold 0.95 \
+  --score2-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
   --max-5p-delta 50 \
   --annotation-bed gene.bed \
