@@ -1,43 +1,58 @@
 # Output directory layout
 
-This page describes the files written by:
+This page describes the files written by `trackclustertu` 0.2.2:
 
 - `trackclustertu run` (full pipeline from FASTQ manifest to TU/gene outputs),
 - `trackclustertu map` (FASTQ -> minimap2 -> sorted BAM -> BED manifests),
-- `trackclustertu bam-to-bed` (BAM -> BED6), and
-- `trackclustertu cluster` / `trackclustertu recount` (TU clustering and recounting), and
+- `trackclustertu bam-to-bed` (BAM -> BED6),
+- `trackclustertu cluster` / `trackclustertu recount` (TU clustering and recounting),
 - `trackclustertu diagnose-missed-tus` / `trackclustertu rescue-missed-tus` (post-clustering missed-TU review and rescue)
 
 ## Common outputs (from `trackclustertu cluster`)
 
-Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster` writes:
+Given an input BED/TSV (usually a sorted BED6 track), `trackclustertu cluster`
+writes the files below. Filenames are defaults relative to the output
+directory; individual `--out-*` options can override them.
 
-- `*.tus.bed` (BED6): one line per TU interval
+- `tus.bed` (BED6): one line per TU interval
   - columns: `chrom  start  end  tu_id  0  strand`
   - default IDs encode contig bytes, coordinates, and strand, so filtering another TU does not renumber this call
   - coordinate-identical final consensus families are coalesced before output, and stable-ID uniqueness is enforced
-- `*.tu_id_map.tsv`: emitted, stable, and sequential compatibility IDs with genomic identity
+- `tu_id_map.tsv`: emitted, stable, and sequential compatibility IDs with genomic identity
   - pass `--tu-id-style sequential` only when an older downstream workflow requires serial `TU000001` names
-- `*.membership.tsv` (TSV): one line per read assignment
+- `membership.tsv` (TSV): one line per read assignment
   - schema marker: `#trackclustertu_membership_schema=v2`
   - cluster writes the canonical 20-column v2 form
   - the first four columns remain `read_id  tu_id  score1  score2`; `score1` is `overlap / union` and `score2` is `overlap / max(length)`
   - appended fields record assignment status, best/second candidates and scores, both endpoint deltas, assignment-score margin, primary/fractional weights, and full-length-evidence state
-- `*.tu_count.csv` (CSV): TU counts table
+- `tu_count.csv` (CSV): TU counts table
   - header: `tu_id,count,unique_count,full_length_evidence_count,total_count,fractional_count`
   - `count` is a compatibility alias for `total_count`
-- `*.tu_endpoint_stats.tsv` (TSV): auditable consensus evidence
+- `tu_endpoint_stats.tsv` (TSV): auditable consensus evidence
   - support, strand-aware consensus endpoints, endpoint min/max/spreads, and the longest example molecule
 - `read_rejections.tsv` (TSV, schema `trackclustertu.read-rejections.v1`): every read excluded during parsing, validation, deduplication, or length filtering
   - columns: `sample  source_path  input_format  record  line  read_id  stage  reason  detail`
   - the file is written atomically and remains header-only when every read is accepted; override it with `--out-read-rejections`
 
 By default, `trackclustertu cluster` forms `score1` seed clusters and then runs a second-pass `score2` attachment that pools truncated molecules with their parent cluster.
-Set the thresholds with `--score1-threshold` and `--score2-threshold`.
+Set the thresholds with `--span-jaccard-threshold` and `--overlap-over-longer-threshold`.
+The [README](../README.md#similarity-scores) lists the supported compatibility aliases.
 The second-pass 3 prime gate is one-sided: a shorter cluster may terminate anywhere inside its parent but may not overhang the parent's strand-aware 3 prime end by more than `12 bp` by default. Configure the limit with `--three-prime-tolerance-bp`.
 If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta`.
-If `--skip-score2-attachment` is used, the `score1` seed clusters are kept as the final TUs.
+If `--skip-overlap-over-longer-attachment` is used, second-pass pooling, contained-fragment absorption, and partial assignment are disabled. The `score1` seed components still undergo final direct-consensus refinement and may split into multiple TUs.
 Clustering is span-based: when the input is BED12, only the outer transcript interval `[tx_start, tx_end)` participates in `score1` and `score2`.
+
+After pooling, final families are checked against their consensus. Only
+anchor-quality members (`score1` at or above the threshold against the family
+anchor) vote on boundaries; compatible contained fragments add support without
+moving those boundaries. Fragment retention and partial assignment use a
+length-scaled jitter window of
+`max(three_prime_tolerance_bp, floor((1 - score1_threshold) * read_length))`.
+The second-pass attachment gate itself uses the fixed 3-prime overhang limit.
+
+Endpoint statistics include every retained family member, including fragments,
+before final read reassignment. Use `membership.tsv` and the count tables for
+final assignments and counts; family support can differ from final hard counts.
 
 Individual read-record errors are recoverable by default: the bad read is
 quarantined, its reason is recorded, and parsing continues with the next
@@ -52,14 +67,14 @@ failures, output failures, and cross-output invariants are never downgraded.
 
 When `--manifest` is used, `trackclustertu cluster` can also write:
 
-- `*.pooled.bed` (BED6): pooled reads used for clustering
+- `pooled.bed` (BED6): pooled reads used for clustering
   - read IDs are rewritten as `<sample>::<read_id>`
   - `::` is the reserved sample/read separator, so manifest sample names cannot contain it
-- `*.tu_sample_long.tsv` (TSV): one row per non-zero `(tu_id, sample)` pair
+- `tu_sample_long.tsv` (TSV): one row per non-zero `(tu_id, sample)` pair
   - columns: `tu_id  sample  unique_count  full_length_evidence_count  total_count  fractional_count`
-- `*.tu_sample_matrix.tsv` (TSV): TU-by-sample count matrix
+- `tu_sample_matrix.tsv` (TSV): TU-by-sample count matrix
   - header: `tu_id` plus `<sample>.<metric>` columns in manifest order
-- `*.tu_group_matrix.tsv` (TSV): TU-by-group count matrix
+- `tu_group_matrix.tsv` (TSV): TU-by-group count matrix
   - header: `tu_id` plus `<group>.<metric>` columns in first-seen manifest order
   - written only when the manifest has a non-empty `group` column
 
@@ -81,23 +96,23 @@ fractional-only support does not satisfy it.
 
 If `--annotation-bed` is provided, it can also write:
 
-- `*.tu_gene.tsv` (TSV, schema `trackclustertu_tu_gene_schema=v2`): qualifying same-strand and antisense TU×gene relationships
+- `tu_gene.tsv` (TSV, schema `trackclustertu_tu_gene_schema=v2`): qualifying same-strand and antisense TU×gene relationships
   - columns: `contig  strand  tu_id  tu_start  tu_end  relation  context_order  gene_id  gene_start  gene_end  overlap_bp  tu_fraction  gene_fraction`
   - `context_order` follows transcription direction (low-to-high coordinates on `+`, high-to-low on `-`)
-- `*.tu_semantics.tsv` (TSV, schema `trackclustertu_tu_semantics_schema=v1`): one row per TU
+- `tu_semantics.tsv` (TSV, schema `trackclustertu_tu_semantics_schema=v1`): one row per TU
   - includes the ordered same-strand gene-context signature, ordered antisense context, and fixed-order multi-label classifications
   - criteria are embedded as metadata: same-context shared 3-prime/different 5-prime for `alternative_start`; same-context shared 5-prime/different 3-prime for `alternative_termination`; two or more same-strand genes for `readthrough`; opposite-strand overlap for `antisense`; no qualifying relationship for `intergenic`; and strict same-context containment with both boundaries internal for `probable_processing_product`
-- `*.tus.gff3` (GFF3): 1-based inclusive `transcript` features plus child `gene_overlap` relationship features linked with `Parent`
+- `tus.gff3` (GFF3): 1-based inclusive `transcript` features plus child `gene_overlap` relationship features linked with `Parent`
   - sequence IDs and attributes are UTF-8 byte percent-escaped where required by GFF3
-- `*.tus.anchored.bed12` (BED12 + extra columns): TU blocks clipped to qualifying same-strand genes
+- `tus.anchored.bed12` (BED12 + extra columns): TU blocks clipped to qualifying same-strand genes
   - extra column `name2`: comma-separated member read IDs, with `|<read_count>` suffix
   - extra column `gene_list`: comma-separated qualifying same-strand gene IDs
   - when there is no qualifying same-strand gene, the record has one full-TU block and `gene_list=.`; antisense-only relationships do not create blocks or gene-list entries
-- `*.gene_count.csv` (CSV): gene counts table
+- `gene_count.csv` (CSV): gene counts table
   - same metric columns as TU counts: compatibility `count`, unique, full-length-evidence, hard total, and fractional
-- `*.gene_sample_matrix.tsv` (TSV): gene-by-sample count matrix
+- `gene_sample_matrix.tsv` (TSV): gene-by-sample count matrix
   - header: `gene_id` plus `<sample>.<metric>` columns in manifest order
-- `*.gene_group_matrix.tsv` (TSV): gene-by-group count matrix
+- `gene_group_matrix.tsv` (TSV): gene-by-group count matrix
   - header: `gene_id` plus `<group>.<metric>` columns in first-seen manifest order
   - written only when the manifest has a non-empty `group` column
 
@@ -274,8 +289,12 @@ The `run` subcommand writes the same mapping and clustering outputs as running `
 - `annotation.bed`: converted annotation BED when `--annotation-gff` is used
 - `run_manifest.json`: published only after the complete `run` pipeline succeeds
 
-`trackclustertu run` also forwards the clustering controls used by `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
+`trackclustertu run` forwards TU discovery controls including `--span-jaccard-threshold`, `--overlap-over-longer-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-overlap-over-longer-attachment`, plus TU support filtering, annotation-overlap policy, and assignment controls.
 It does not automatically run the missed-TU diagnose/rescue stages.
+
+`--strict-read-errors` and `--out-read-rejections` are options on `cluster`,
+`diagnose-missed-tus`, and `rescue-missed-tus`. `run` uses the default
+recoverable-read policy and the default clustering rejection-report path.
 
 Mapping always supplies minimap2 with `-ax map-ont`. It then appends repeatable `--minimap2-arg <OS_VALUE>` options without whitespace reparsing and accepts explicit `--minimap2` / `--samtools` paths. The old `--minimap2-args "..."` form appends its whitespace-split values, is deprecated, and cannot be combined with the repeatable form.
 
@@ -317,10 +336,9 @@ Once you have `samples.bed.tsv`, you can re-run clustering without re-mapping:
 trackclustertu cluster \
   --manifest samples.bed.tsv \
   --format bed6 \
-  --score1-threshold 0.95 \
-  --score2-threshold 0.80 \
+  --span-jaccard-threshold 0.95 \
+  --overlap-over-longer-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
-  --max-5p-delta 50 \
   --annotation-bed gene.bed \
   --out-dir results
 ```

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="doc/logo.svg" alt="trackclusterTU logo" width="220">
+  <img src="doc/logo-v3-hex.png" alt="trackclusterTU hexagonal logo: three read tracks merging into one consensus transcript arrow" width="220">
 </p>
 
 # trackclusterTU
@@ -8,12 +8,19 @@ Fast interval similarity and scalable clustering for bacterial transcript units 
 
 This repository ships the Rust `trackclustertu` CLI.
 
+## Workflow Overview
+
+![trackclusterTU: long reads to consensus bacterial TUs, read assignments, sample and group counts, optional gene interpretation, and separate missed-TU recovery](doc/pipeline.svg)
+
+TU discovery uses read spans and strand without requiring gene annotation. With multiple samples, reads are pooled into a shared TU catalogue and counted by sample and group. Optional annotation adds gene relationships and transcript classifications; missed-TU diagnosis, rescue, and recounting are separate commands after clustering.
+
 ## Project Metadata
 
 - Repository: [lrslab/trackclusterTU](https://github.com/lrslab/trackclusterTU)
 - Distribution: GitHub Release binaries built with `cargo build --release`; this project is not published to crates.io
 - Rust package: `trackclustertu`
 - CLI binary: `trackclustertu`
+- Current package/documentation version: `0.2.2` ([changelog](CHANGELOG.md#022---2026-08-26))
 - License: MIT
 
 ## What Is A TU Here?
@@ -27,10 +34,20 @@ When the input is BED12, clustering intentionally uses only the outer transcript
 - `score1`: `overlap / union`
 - `score2`: `overlap / max(lenA, lenB)`
 
+The CLI uses descriptive option names; the historical aliases remain supported:
+
+| Current option | Compatibility alias |
+| --- | --- |
+| `--span-jaccard-threshold` | `--score1-threshold` |
+| `--overlap-over-longer-threshold` | `--score2-threshold` |
+| `--skip-overlap-over-longer-attachment` | `--skip-score2-attachment` |
+
+Output columns retain the names `score1` and `score2`.
+
 By default, `trackclustertu cluster` and `trackclustertu run` use `score1` to form seed clusters and then use `score2` in a second pass to pool truncated molecules with their parent cluster.
 That second pass is one-sided on the 3 prime end: a shorter cluster may terminate anywhere inside its parent's span but may not overhang the parent's strand-aware 3 prime end by more than `12 bp` by default; adjust it with `--three-prime-tolerance-bp`.
 If you need to relax 5 prime fragmentation for near-matching reads, you can also set `--max-5p-delta` to allow merges within an explicit strand-aware 5 prime delta.
-If you want to keep only the `score1` seed clusters as the final TUs, pass `--skip-score2-attachment`.
+Pass `--skip-overlap-over-longer-attachment` to disable second-pass pooling, contained-fragment absorption, and partial read assignments. The `score1` seed components still undergo final direct-consensus refinement and can split into multiple TUs.
 
 Pooled reads are then split into final consensus families. Boundary consensus is voted on only by anchor-quality members (`score1` at or above the threshold against the family anchor), while contained fragments — reads staying inside the consensus span up to a length-scaled jitter window on either end — are absorbed as members that count toward support without moving boundaries. Membership is always justified against the final consensus, never through a chain of intermediate reads, so distinct endpoint modes beyond the jitter window still split into separate TUs.
 
@@ -55,6 +72,8 @@ your `PATH`. Before using the binary, verify the archive against the required
 entry.
 
 ### Option 2: Clone And Build From Source
+
+Building requires Rust 1.88 or newer.
 
 ```bash
 git clone https://github.com/lrslab/trackclusterTU.git
@@ -110,8 +129,8 @@ trackclustertu gff-to-bed --help
 
 Docs and examples:
 
-- `doc/README.md`
-- `examples/README.md`
+- [Command guide and documentation index](doc/README.md)
+- [Runnable examples with expected outputs](examples/README.md)
 
 Quick examples:
 
@@ -251,7 +270,7 @@ count table.
 
 The current built-in defaults in code are:
 
-- clustering: `--score1-threshold 0.95`, `--score2-threshold 0.80`, `--three-prime-tolerance-bp 12`
+- clustering: `--span-jaccard-threshold 0.95`, `--overlap-over-longer-threshold 0.80`, `--three-prime-tolerance-bp 12`
 - diagnose/rescue: `--three-prime-window-bp 12`, `--max-three-prime-family-diameter-bp 12` (defaults to the 3-prime window), `--five-prime-window-bp 10`, `--min-family-support 20`, `--min-mode-support 20`, `--min-mode-fraction 0.02`, `--max-candidates-per-family 3`; `--min-read-len` is unset
 - rescue naming: `--rescue-prefix RESC`
 
@@ -314,11 +333,9 @@ remains in `rescue/rescued.tu_count.csv` but does not appear in recount matrices
 
 ## Full Pipeline
 
-![trackclusterTU workflow from mapped reads through clustering, optional missed-TU rescue, and recounting](doc/pipeline.svg)
+`trackclustertu run` covers steps 1–3 in the [workflow overview](#workflow-overview):
 
-Supported workflow:
-
-`FASTQ -> sorted BAM -> BED6 -> TU clustering -> TU/gene counts`
+`FASTQ -> sorted BAM -> BED6 -> TU clustering -> TU counts (+ gene outputs with annotation)`
 
 ### Step 1: Prepare A Sample Manifest
 
@@ -347,7 +364,7 @@ trackclustertu run \
   --out-dir results
 ```
 
-`trackclustertu run` accepts the same clustering controls as `trackclustertu cluster`, including `--score1-threshold`, `--score2-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-score2-attachment`.
+`trackclustertu run` forwards TU discovery controls including `--span-jaccard-threshold`, `--overlap-over-longer-threshold`, `--three-prime-tolerance-bp`, `--max-5p-delta`, and `--skip-overlap-over-longer-attachment`, plus TU support filtering, annotation-overlap policy, and assignment controls.
 It does not automatically run `diagnose-missed-tus` or `rescue-missed-tus`.
 
 This writes:
@@ -405,15 +422,14 @@ trackclustertu gff-to-bed \
 trackclustertu cluster \
   --manifest mapped/samples.bed.tsv \
   --format bed6 \
-  --score1-threshold 0.95 \
-  --score2-threshold 0.80 \
+  --span-jaccard-threshold 0.95 \
+  --overlap-over-longer-threshold 0.80 \
   --three-prime-tolerance-bp 12 \
-  --max-5p-delta 50 \
   --annotation-bed genes.bed \
   --out-dir results
 ```
 
-The default clustering thresholds are `--score1-threshold 0.95` and `--score2-threshold 0.80`.
+The default clustering thresholds are `--span-jaccard-threshold 0.95` and `--overlap-over-longer-threshold 0.80`.
 The default second-pass 3 prime allowance is `--three-prime-tolerance-bp 12`.
 `--max-5p-delta` is optional and disabled unless you set it.
 
@@ -428,6 +444,10 @@ if any read is rejected. Strict mode evaluates the input and fails before
 publishing the output set; it does not promise to stop decoding at the first
 bad record. File/manifest structure and I/O errors, output failures, and
 internal consistency failures remain fatal.
+
+`--strict-read-errors` and `--out-read-rejections` are available on `cluster`,
+`diagnose-missed-tus`, and `rescue-missed-tus`. `run` uses the default
+recoverable-read policy and writes `read_rejections.tsv` in its output directory.
 
 For inputs with at least one retained read, clustering and read assignment
 report structured `pipeline_stage` start/completion lines to stderr, including

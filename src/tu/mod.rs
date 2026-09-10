@@ -212,11 +212,16 @@ pub struct TuClusteringStats {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// Optional second-pass TU clustering behavior.
+/// Controls for TU attachment, fragment retention, and read assignment.
 pub struct TuClusteringOptions {
-    /// Permit contained molecules to attach in the second pass.
+    /// Enable second-pass pooling, contained-fragment retention, and partial assignment.
+    ///
+    /// When false, span-Jaccard seed components still undergo direct-consensus refinement.
     pub attach_contained_reads: bool,
-    /// Maximum absolute 3-prime mismatch for a second-pass edge.
+    /// Maximum strand-aware 3-prime overhang beyond the parent for a second-pass edge.
+    ///
+    /// Internal 3-prime ends are allowed. This is also the minimum jitter window for
+    /// fragment retention and partial assignment, which scale with read length.
     pub three_prime_tolerance_bp: u32,
     /// Optional maximum absolute 5-prime mismatch override.
     pub max_five_prime_delta_bp: Option<u32>,

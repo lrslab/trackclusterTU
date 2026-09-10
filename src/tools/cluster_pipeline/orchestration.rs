@@ -84,18 +84,23 @@ struct ClusterCli {
     )]
     score2_threshold: f64,
 
-    /// Allowed strand-aware 3 prime mismatch during overlap-over-longer attachment (bp).
+    /// Maximum strand-aware 3 prime overhang beyond the parent during attachment (bp).
+    ///
+    /// A shorter cluster may terminate anywhere inside its parent. This value also sets
+    /// the minimum length-scaled jitter window for fragment retention and partial assignment.
     #[arg(long, default_value_t = 12)]
     three_prime_tolerance_bp: u32,
 
     /// Optional maximum strand-aware 5 prime delta allowed during the attachment pass (bp).
     ///
-    /// When set, pairs within this 5 prime cap and the 3 prime tolerance may still merge even
+    /// When set, pairs within this 5 prime cap and the one-sided 3 prime overhang limit may merge even
     /// if overlap over longer falls below its threshold.
     #[arg(long = "max-5p-delta")]
     max_five_prime_delta_bp: Option<u32>,
 
-    /// Skip overlap-over-longer attachment and keep span-Jaccard seed clusters as final TUs.
+    /// Disable second-pass pooling, contained-fragment absorption, and partial assignment.
+    ///
+    /// Span-Jaccard seed components still undergo final direct-consensus refinement.
     #[arg(
         long = "skip-overlap-over-longer-attachment",
         visible_alias = "skip-score2-attachment"

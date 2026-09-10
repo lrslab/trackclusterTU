@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows SemVer.
 
 ## [Unreleased]
 
+### Documentation
+
+- Added the illustrated workflow overview and aligned command help and public
+  API descriptions with the one-sided attachment gate and final-consensus
+  behavior in 0.2.2. Updated example membership fixtures to include covering-TU
+  runner-up candidates and documented the primary CLI names and their aliases.
+
 ## [0.2.2] - 2026-08-26
 
 This patch restores truncated-molecule pooling that was lost in `0.2.0`, while

@@ -11,6 +11,10 @@ coordinate-derived TU IDs, canonical v2 membership rows, explicit count
 semantics in `tu_count.csv`, and count-semantics columns in the sample/group
 matrices.
 
+The fixtures match version 0.2.2. The contained read `sampleB::r1` also records
+the covering TU as a runner-up candidate while retaining its unique direct
+assignment.
+
 Run:
 
 ```bash

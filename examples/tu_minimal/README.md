@@ -8,6 +8,10 @@ Selected expected outputs are under `expected/`. They cover the three core
 files: stable coordinate-derived TU IDs, canonical v2 membership rows, and
 explicit count semantics in `tu_count.csv`.
 
+The fixtures match version 0.2.2. Contained reads `r3` and `r6` also record a
+covering TU as a runner-up candidate; their stronger direct matches remain
+unique assignments.
+
 Run:
 
 ```bash
