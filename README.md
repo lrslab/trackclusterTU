@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="doc/logo-v3-hex.png" alt="trackclusterTU hexagonal logo: three read tracks merging into one consensus transcript arrow" width="220">
+  <img src="doc/logo.svg" alt="trackclusterTU logo" width="220">
 </p>
 
 # trackclusterTU
